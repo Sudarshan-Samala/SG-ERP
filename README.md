@@ -1,42 +1,42 @@
 # SG ERP
 
-## Product Requirements Document (PRD)
+## Master Product Requirements Document (PRD)
 **Product:** SG ERP  
-**Version:** 1.0  
-**Status:** Draft for design, development, and deployment planning  
+**Version:** 2.4.0  
+**Status:** Execution Governance Baseline  
 **Owner:** SG ERP Program Team  
-**Last Updated:** 2026-07-29
+**Last Updated:** 2026-07-30
 
 ---
 
 ## 1. Vision
-SG ERP is a future-ready enterprise resource planning platform designed to unify finance, HR, operations, procurement, inventory, manufacturing, assets, projects, support, and analytics in one intelligent system.
+SG ERP is a practical, scalable enterprise resource planning platform that unifies finance, procurement, inventory, manufacturing, HR, assets, projects, support, and analytics into one secure system.
 
-The product is built for organizations that want:
-- Real-time visibility across departments
-- Workflow automation instead of manual coordination
-- AI-assisted decision support
-- Scalable cloud deployment
-- Strong audit, security, and compliance controls
-- Continuous improvement with short release cycles
+The product is built for organizations that need:
+- Real-time operational visibility
+- Workflow automation
+- Strong audit and compliance controls
+- Configurable business rules
+- Modular growth without architectural rewrites
+- AI-ready foundations for future assistive features
 
 ---
 
 ## 2. Product Summary
-SG ERP will be a modular, multi-tenant, cloud-ready ERP platform that can support small teams, growing companies, schools, manufacturing units, service organizations, and enterprise operations.
+SG ERP will be delivered as a modular, enterprise-ready application with a frozen core platform and reusable shared services. It should support small teams, growing businesses, schools, service organizations, and enterprise deployments.
 
-The system will provide a single source of truth for business records and will reduce dependency on spreadsheets, email threads, and disconnected tools.
+The platform should reduce dependency on spreadsheets, disconnected tools, and manual approvals by providing a single source of truth for business records, operational workflows, and management reporting.
 
 ---
 
 ## 3. Product Goals
 1. Centralize core business operations in one platform.
 2. Automate repetitive tasks and approval workflows.
-3. Provide live dashboards and reports for management.
+3. Provide live dashboards and management reports.
 4. Support secure role-based access for all departments.
-5. Enable AI-powered insights, alerts, and recommendations.
-6. Allow fast configuration without heavy custom coding.
-7. Support future expansion into industry-specific modules.
+5. Enable configurable business rules without code changes wherever practical.
+6. Support future expansion into industry-specific modules.
+7. Preserve implementation quality through traceability, test coverage, and governance.
 
 ---
 
@@ -49,6 +49,7 @@ Out of scope for MVP:
 - Full payroll localization for all regions
 - Public marketplace features
 - Highly customized industry plug-ins without a core framework
+- Architectural rewrites unless a critical security or business need is identified
 
 ---
 
@@ -58,7 +59,7 @@ Out of scope for MVP:
 - Finance managers
 - HR teams
 - Operations managers
-- Purchase and inventory teams
+- Procurement and inventory teams
 - Department heads
 - Administrators
 - Support staff
@@ -82,6 +83,7 @@ A single executive dashboard with:
 - Pending approvals
 - Revenue, expense, and stock snapshots
 - Activity timeline
+- Role-based visibility
 
 ### 6.2 Finance
 - Invoices
@@ -92,6 +94,7 @@ A single executive dashboard with:
 - Cash flow view
 - Tax-ready reports
 - Financial approvals
+- Journal posting foundation
 
 ### 6.3 HR and Employee Management
 - Employee master
@@ -110,6 +113,7 @@ A single executive dashboard with:
 - GRN tracking
 - Approval workflows
 - Supplier performance tracking
+- RFQ capability
 
 ### 6.5 Inventory
 - Item master
@@ -119,6 +123,7 @@ A single executive dashboard with:
 - Location-wise stock
 - Consumption tracking
 - Damage and adjustment logs
+- Transfer and ledger foundation
 
 ### 6.6 Assets
 - Asset register
@@ -143,6 +148,7 @@ A single executive dashboard with:
 - Custom filters
 - Export to PDF, CSV, and Excel
 - Drill-down analytics
+- Scheduled delivery
 
 ### 6.9 Support and Helpdesk
 - Ticket creation
@@ -159,6 +165,7 @@ A single executive dashboard with:
 - Master data setup
 - Configuration settings
 - Notification controls
+- Feature flags
 
 ---
 
@@ -213,6 +220,7 @@ SG ERP should be designed with AI and automation as first-class capabilities.
 - Forms should autosave where possible
 - Approval queues should be easy to scan
 - Mobile view should support essential actions
+- Accessibility should be verified for major UI flows
 
 ---
 
@@ -223,6 +231,8 @@ SG ERP should be designed with AI and automation as first-class capabilities.
 - Password reset
 - Session timeout
 - MFA support roadmap
+- Refresh token rotation
+- Session revocation support
 
 ### Authorization
 - Role-based access control
@@ -235,12 +245,14 @@ SG ERP should be designed with AI and automation as first-class capabilities.
 - Soft delete for critical records
 - Attachment upload support
 - Duplicate detection for key entities
+- Optimistic locking for transactional updates
 
 ### Workflow Management
 - Draft, review, approve, reject, reopen
 - Escalation rules
 - Comment history
 - Status tracking
+- SLA tracking
 
 ### Reporting
 - Filter by date, branch, department, and owner
@@ -255,24 +267,30 @@ SG ERP should be designed with AI and automation as first-class capabilities.
 - Component-based UI
 - Fast navigation
 - Table-heavy screens optimized for productivity
+- Accessibility-first implementation
 
 ### Backend
 - REST API-first architecture
 - Modular service structure
 - Validation at API and database levels
 - Background jobs for scheduled tasks
+- Structured logging
+- Correlation IDs
 
 ### Database
 - Relational database for transactional records
 - Strong indexing for search and reports
 - Audit tables for history
 - Backup and restore strategy
+- UUID primary keys
+- Version columns for optimistic locking
 
 ### Infrastructure
 - Cloud deployment ready
 - Environment separation: dev, test, staging, production
 - Monitoring, logs, alerts, and backups
 - Horizontal scaling support
+- Docker-based development environment
 
 ---
 
@@ -295,6 +313,10 @@ Core entities:
 - Tickets
 - Approvals
 - Audit Logs
+- Configuration Records
+- Feature Flags
+- Document Number Sequences
+- Business Calendar Records
 
 ---
 
@@ -308,6 +330,9 @@ Core entities:
 - API authentication and rate limiting
 - Backup encryption
 - Least-privilege access
+- Security event logging
+- Secrets management
+- File scanning hook for attachments
 
 ---
 
@@ -337,6 +362,9 @@ SG ERP should be able to connect with:
 - BI dashboards
 - SSO and identity providers
 - Webhooks and external APIs
+- Barcode and RFID systems
+
+Integrations should use adapter interfaces and avoid direct coupling to business modules.
 
 ---
 
@@ -352,6 +380,7 @@ SG ERP should be able to connect with:
 - Ticketing
 - Reports and exports
 - Audit log
+- Workflow foundation
 
 ### MVP should feel complete even if advanced automation comes later.
 
@@ -393,8 +422,8 @@ Recommended operating rhythm:
 - Review user feedback continuously
 - Prioritize the highest-value fixes first
 - Ship small improvements frequently
-- Reassess workflows and reports every hour during active build or tuning sessions
-- Roll up hourly learnings into the weekly release plan
+- Reassess workflows and reports regularly during active build or tuning sessions
+- Roll up learnings into the weekly release plan
 
 This keeps the product improving without waiting for large, slow redesigns.
 
@@ -409,6 +438,7 @@ This keeps the product improving without waiting for large, slow redesigns.
 - Higher report usage
 - Lower ticket resolution time
 - Improved user adoption
+- Reduced implementation defects
 
 ---
 
@@ -421,6 +451,7 @@ This keeps the product improving without waiting for large, slow redesigns.
 - Approvals work end to end
 - Audit logs capture key actions
 - UI is usable on desktop and mobile
+- Shared services are reusable by future modules
 
 ---
 
@@ -436,5 +467,41 @@ This keeps the product improving without waiting for large, slow redesigns.
 
 ---
 
-## 22. Closing Statement
+## 22. Delivery Governance
+### Definition of Ready
+Before implementation begins, each feature must have:
+- Business requirement approved
+- Acceptance criteria defined
+- Data model reviewed
+- API contract drafted
+- Permission model defined
+- Test scenarios identified
+
+### Definition of Done
+A feature is complete only when:
+- Implementation is complete
+- Code is reviewed
+- Unit and integration tests pass
+- API documentation is updated
+- Audit logging is implemented
+- Security checks pass
+- Migration is validated
+- User guide is updated
+
+### Module Blueprint
+Every module should follow a consistent structure:
+- api/
+- services/
+- domain/
+- repositories/
+- models/
+- schemas/
+- events/
+- validators/
+- tests/
+- docs/
+
+---
+
+## 23. Closing Statement
 SG ERP is designed to become a practical, scalable, and intelligent enterprise platform. The goal is not only to digitize operations, but to improve speed, visibility, and decision-making across the entire organization.
