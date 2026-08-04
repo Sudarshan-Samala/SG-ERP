@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.base import Organization, User
-from app.services.auth import get_password_hash
+from app.services.auth import get_password_hash, verify_password
 
 
 _BOOTSTRAP_LOCK_KEY = 734672001
@@ -19,11 +19,12 @@ class BootstrapResult:
 
 
 def bootstrap_super_admin(db: Session, email: str, password: str) -> BootstrapResult:
-    """Create the initial super admin exactly once.
+    """Create or synchronize the configured bootstrap super admin.
 
-    The caller supplies credentials from configuration/environment. The plaintext
-    password is used only as input to the project's password hashing utility and
-    is never persisted or logged.
+    Credentials are supplied from configuration/environment. The plaintext
+    password is used only for verification/hashing and is never persisted or
+    logged. Re-running bootstrap is idempotent and keeps the configured account
+    usable when its bootstrap password changes.
     """
     email = (email or "").strip().lower()
     if not email:
@@ -31,19 +32,53 @@ def bootstrap_super_admin(db: Session, email: str, password: str) -> BootstrapRe
     if not password:
         raise ValueError("BOOTSTRAP_ADMIN_PASSWORD is required")
 
-    # The application uses PostgreSQL. Serialize bootstrap attempts so two
-    # processes cannot create different first super admins concurrently.
+    # Serialize bootstrap attempts so concurrent deploy processes cannot race.
     db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": _BOOTSTRAP_LOCK_KEY})
-
-    existing_super_admin = db.query(User).filter(User.is_superuser.is_(True)).first()
-    if existing_super_admin is not None:
-        db.rollback()
-        return BootstrapResult(created=False, reason="super_admin_exists")
 
     existing_email = db.query(User).filter(User.email == email).first()
     if existing_email is not None:
+        if not existing_email.is_superuser:
+            db.rollback()
+            return BootstrapResult(
+                created=False,
+                reason="email_belongs_to_non_superuser",
+                user_id=str(existing_email.id),
+            )
+
+        changed = False
+        if not existing_email.is_active:
+            existing_email.is_active = True
+            changed = True
+
+        if not verify_password(password, existing_email.hashed_password):
+            existing_email.hashed_password = get_password_hash(password)
+            changed = True
+
+        if changed:
+            db.commit()
+            db.refresh(existing_email)
+            return BootstrapResult(
+                created=False,
+                reason="super_admin_synchronized",
+                user_id=str(existing_email.id),
+            )
+
         db.rollback()
-        return BootstrapResult(created=False, reason="email_already_exists")
+        return BootstrapResult(
+            created=False,
+            reason="super_admin_current",
+            user_id=str(existing_email.id),
+        )
+
+    # Do not silently create a second super admin with a different email.
+    existing_super_admin = db.query(User).filter(User.is_superuser.is_(True)).first()
+    if existing_super_admin is not None:
+        db.rollback()
+        return BootstrapResult(
+            created=False,
+            reason="different_super_admin_exists",
+            user_id=str(existing_super_admin.id),
+        )
 
     organization = db.query(Organization).order_by(Organization.created_at.asc()).first()
     if organization is None:
