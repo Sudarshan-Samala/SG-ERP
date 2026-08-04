@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -14,7 +15,7 @@ from app.services.auth import create_access_token, verify_password
 from app.services.auth_audit import record_auth_event
 from app.services.csrf import clear_csrf_cookie, generate_csrf_token, require_csrf, set_csrf_cookie
 from app.services.rate_limit import SlidingWindowRateLimiter
-from app.services.session_service import InvalidSession, RefreshReplayDetected, create_session, revoke_all_sessions, revoke_session, rotate_refresh_token
+from app.services.session_service import InvalidSession, RefreshReplayDetected, create_session, list_active_sessions, revoke_all_sessions, revoke_session, rotate_refresh_token
 from app.services.user_service import get_user_by_email
 
 router = APIRouter()
@@ -30,6 +31,12 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     session_id: UUID
+
+class SessionView(BaseModel):
+    id: UUID
+    created_at: datetime
+    last_used_at: datetime | None
+    expires_at: datetime
 
 
 def _client_metadata(request: Request) -> tuple[str | None, str | None]:
@@ -80,25 +87,37 @@ def refresh(request_body: RefreshRequest, request: Request, response: Response, 
         issued = rotate_refresh_token(db, session_id=request_body.session_id, organization_id=request_body.organization_id, refresh_token=refresh_token)
     except RefreshReplayDetected:
         record_auth_event(db, event_type="refresh", outcome="replay", organization_id=request_body.organization_id, session_id=request_body.session_id, ip_address=ip, user_agent=ua)
-        _clear_refresh_cookie(response)
-        clear_csrf_cookie(response)
+        _clear_refresh_cookie(response); clear_csrf_cookie(response)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
     except InvalidSession:
         record_auth_event(db, event_type="refresh", outcome="failure", organization_id=request_body.organization_id, session_id=request_body.session_id, ip_address=ip, user_agent=ua)
-        _clear_refresh_cookie(response)
-        clear_csrf_cookie(response)
+        _clear_refresh_cookie(response); clear_csrf_cookie(response)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
     user = db.query(User).filter(User.id == issued.session.user_id, User.organization_id == issued.session.organization_id, User.is_active.is_(True)).first()
     if user is None:
         revoke_session(db, session_id=issued.session.id, user_id=issued.session.user_id, organization_id=issued.session.organization_id, reason="user_inactive")
         record_auth_event(db, event_type="refresh", outcome="inactive", organization_id=issued.session.organization_id, user_id=issued.session.user_id, session_id=issued.session.id, ip_address=ip, user_agent=ua)
-        _clear_refresh_cookie(response)
-        clear_csrf_cookie(response)
+        _clear_refresh_cookie(response); clear_csrf_cookie(response)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
     access_token = create_access_token(subject=user.id, organization_id=user.organization_id, session_id=issued.session.id)
     _set_refresh_cookie(response, issued.refresh_token)
     record_auth_event(db, event_type="refresh", outcome="success", organization_id=user.organization_id, user_id=user.id, session_id=issued.session.id, ip_address=ip, user_agent=ua)
     return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer"}
+
+
+@router.get("/sessions", response_model=list[SessionView])
+def sessions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return list_active_sessions(db, user_id=current_user.id, organization_id=current_user.organization_id)
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(session_id: UUID, request: Request, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    require_csrf(request)
+    ip, ua = _client_metadata(request)
+    revoked = revoke_session(db, session_id=session_id, user_id=current_user.id, organization_id=current_user.organization_id, reason="user_revoked")
+    if not revoked:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    record_auth_event(db, event_type="session_revoke", outcome="success", organization_id=current_user.organization_id, user_id=current_user.id, session_id=session_id, ip_address=ip, user_agent=ua)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -107,8 +126,7 @@ def logout(request_body: LogoutRequest, request: Request, response: Response, db
     ip, ua = _client_metadata(request)
     revoked = revoke_session(db, session_id=request_body.session_id, user_id=current_user.id, organization_id=current_user.organization_id)
     record_auth_event(db, event_type="logout", outcome="success" if revoked else "not_found", organization_id=current_user.organization_id, user_id=current_user.id, session_id=request_body.session_id, ip_address=ip, user_agent=ua)
-    _clear_refresh_cookie(response)
-    clear_csrf_cookie(response)
+    _clear_refresh_cookie(response); clear_csrf_cookie(response)
 
 
 @router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
@@ -117,8 +135,7 @@ def logout_all(request: Request, response: Response, db: Session = Depends(get_d
     ip, ua = _client_metadata(request)
     revoke_all_sessions(db, user_id=current_user.id, organization_id=current_user.organization_id)
     record_auth_event(db, event_type="logout_all", outcome="success", organization_id=current_user.organization_id, user_id=current_user.id, ip_address=ip, user_agent=ua)
-    _clear_refresh_cookie(response)
-    clear_csrf_cookie(response)
+    _clear_refresh_cookie(response); clear_csrf_cookie(response)
 
 
 @router.get("/me")
