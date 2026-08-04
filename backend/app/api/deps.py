@@ -1,13 +1,17 @@
+from datetime import datetime
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+from jose import JWTError
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.core.config import settings
+from app.models.auth_session import AuthSession
 from app.models.base import User
 from app.services.auth import decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login")
+
 
 def get_current_user(
     db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)
@@ -18,18 +22,33 @@ def get_current_user(
     )
     try:
         payload = decode_access_token(token)
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        user_id = payload.get("sub")
+        organization_id = payload.get("org")
+        session_id = payload.get("sid")
+        if not user_id or not organization_id or not session_id:
             raise credentials_exception
-    except JWTError:
+    except (JWTError, ValueError, TypeError):
         raise credentials_exception
-        
-    user = db.query(User).filter(User.id == user_id).first()
+
+    session = db.query(AuthSession).filter(
+        AuthSession.id == session_id,
+        AuthSession.user_id == user_id,
+        AuthSession.organization_id == organization_id,
+        AuthSession.revoked_at.is_(None),
+        AuthSession.expires_at > datetime.utcnow(),
+    ).first()
+    if session is None:
+        raise credentials_exception
+
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.organization_id == organization_id,
+        User.is_active.is_(True),
+    ).first()
     if user is None:
         raise credentials_exception
     return user
 
-def get_current_organization(
-    current_user: User = Depends(get_current_user)
-):
+
+def get_current_organization(current_user: User = Depends(get_current_user)):
     return current_user.organization
