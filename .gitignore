@@ -1,0 +1,57 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+backend/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Logs / temporary files
+*.log
+*.tmp
+*.swp
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local backup/reference copies
+Smart_tissue-main/
+frontend_backup_before_ui/
+
+# Credentials / keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Backend environment/secrets
+backend/dev.env
+backend/.env
+backend/.env.*
