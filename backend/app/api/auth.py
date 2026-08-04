@@ -13,10 +13,13 @@ from app.schemas.user import Token
 from app.services.auth import create_access_token, verify_password
 from app.services.auth_audit import record_auth_event
 from app.services.csrf import clear_csrf_cookie, generate_csrf_token, require_csrf, set_csrf_cookie
+from app.services.rate_limit import SlidingWindowRateLimiter
 from app.services.session_service import InvalidSession, RefreshReplayDetected, create_session, revoke_all_sessions, revoke_session, rotate_refresh_token
 from app.services.user_service import get_user_by_email
 
 router = APIRouter()
+login_limiter = SlidingWindowRateLimiter(settings.AUTH_LOGIN_RATE_LIMIT, settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
+refresh_limiter = SlidingWindowRateLimiter(settings.AUTH_REFRESH_RATE_LIMIT, settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
 
 class SessionToken(Token):
     session_id: UUID
@@ -30,8 +33,12 @@ class LogoutRequest(BaseModel):
 
 
 def _client_metadata(request: Request) -> tuple[str | None, str | None]:
-    # Do not trust X-Forwarded-For here unless deployment proxy trust is explicitly configured.
     return (request.client.host if request.client else None, request.headers.get("user-agent"))
+
+
+def _rate_key(request: Request, scope: str) -> str:
+    ip, _ = _client_metadata(request)
+    return f"{scope}:{ip or 'unknown'}"
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -44,6 +51,7 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 @router.post("/login", response_model=SessionToken)
 def login(request: Request, response: Response, db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = Depends()):
+    login_limiter.check(_rate_key(request, "login"))
     ip, ua = _client_metadata(request)
     user = get_user_by_email(db, email=form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -62,6 +70,7 @@ def login(request: Request, response: Response, db: Session = Depends(get_db), f
 
 @router.post("/refresh", response_model=SessionToken)
 def refresh(request_body: RefreshRequest, request: Request, response: Response, db: Session = Depends(get_db), refresh_token: str | None = Cookie(default=None, alias=settings.REFRESH_COOKIE_NAME)):
+    refresh_limiter.check(_rate_key(request, "refresh"))
     require_csrf(request)
     ip, ua = _client_metadata(request)
     if not refresh_token:
