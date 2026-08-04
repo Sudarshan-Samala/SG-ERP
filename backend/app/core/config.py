@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REFRESH_COOKIE_NAME: str = "sg_refresh"
+    REFRESH_COOKIE_SECURE: bool = True
+    REFRESH_COOKIE_SAMESITE: str = "lax"
     BOOTSTRAP_ADMIN_EMAIL: Optional[str] = None
     BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = None
     
