@@ -24,47 +24,12 @@ from app.api.communication import router as comm_router
 from app.api.circular import router as circular_router
 from app.api.document import router as doc_router
 from app.api.dashboard import router as dashboard_router
+from app.api.notifications import router as notification_router
 
 app = FastAPI(title=settings.PROJECT_NAME, openapi_url="/api/v1/openapi.json")
-
-# Credentialed requests must never use wildcard origins. Production should set
-# TRUSTED_ORIGINS to the exact Vercel/custom frontend origins.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.TRUSTED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
-)
-
-app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
-app.include_router(org_router, prefix="/api/v1/organizations", tags=["organizations"])
-app.include_router(branch_router, prefix="/api/v1/branches", tags=["branches"])
-app.include_router(rbac_router, prefix="/api/v1/rbac", tags=["rbac"])
-app.include_router(academic_router, prefix="/api/v1/academic", tags=["academic"])
-app.include_router(user_router, prefix="/api/v1/users", tags=["users"])
-app.include_router(admission_router, prefix="/api/v1/admissions", tags=["admissions"])
-app.include_router(student_router, prefix="/api/v1/students", tags=["students"])
-app.include_router(academic_management_router, prefix="/api/v1/academic-mgmt", tags=["academic-mgmt"])
-app.include_router(attendance_router, prefix="/api/v1/attendance", tags=["attendance"])
-app.include_router(exam_router, prefix="/api/v1/exams", tags=["exams"])
-app.include_router(fee_router, prefix="/api/v1/fees", tags=["fees"])
-app.include_router(finance_router, prefix="/api/v1/finance", tags=["finance"])
-app.include_router(hr_router, prefix="/api/v1/hr", tags=["hr"])
-app.include_router(transport_router, prefix="/api/v1/transport", tags=["transport"])
-app.include_router(inv_asset_router, prefix="/api/v1/inventory-assets", tags=["inventory-assets"])
-app.include_router(helpdesk_router, prefix="/api/v1/helpdesk", tags=["helpdesk"])
-app.include_router(ops_router, prefix="/api/v1/ops", tags=["ops"])
-app.include_router(event_router, prefix="/api/v1/events", tags=["events"])
-app.include_router(comm_router, prefix="/api/v1/communication", tags=["communication"])
-app.include_router(circular_router, prefix="/api/v1/circulars", tags=["circulars"])
-app.include_router(doc_router, prefix="/api/v1/documents", tags=["documents"])
-app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
-
+app.add_middleware(CORSMiddleware, allow_origins=settings.TRUSTED_ORIGINS, allow_credentials=True, allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"], allow_headers=["Authorization","Content-Type","X-CSRF-Token"])
+app.include_router(auth_router,prefix="/api/v1/auth",tags=["auth"]); app.include_router(org_router,prefix="/api/v1/organizations",tags=["organizations"]); app.include_router(branch_router,prefix="/api/v1/branches",tags=["branches"]); app.include_router(rbac_router,prefix="/api/v1/rbac",tags=["rbac"]); app.include_router(academic_router,prefix="/api/v1/academic",tags=["academic"]); app.include_router(user_router,prefix="/api/v1/users",tags=["users"]); app.include_router(admission_router,prefix="/api/v1/admissions",tags=["admissions"]); app.include_router(student_router,prefix="/api/v1/students",tags=["students"]); app.include_router(academic_management_router,prefix="/api/v1/academic-mgmt",tags=["academic-mgmt"]); app.include_router(attendance_router,prefix="/api/v1/attendance",tags=["attendance"]); app.include_router(exam_router,prefix="/api/v1/exams",tags=["exams"]); app.include_router(fee_router,prefix="/api/v1/fees",tags=["fees"]); app.include_router(finance_router,prefix="/api/v1/finance",tags=["finance"]); app.include_router(hr_router,prefix="/api/v1/hr",tags=["hr"]); app.include_router(transport_router,prefix="/api/v1/transport",tags=["transport"]); app.include_router(inv_asset_router,prefix="/api/v1/inventory-assets",tags=["inventory-assets"]); app.include_router(helpdesk_router,prefix="/api/v1/helpdesk",tags=["helpdesk"]); app.include_router(ops_router,prefix="/api/v1/ops",tags=["ops"]); app.include_router(event_router,prefix="/api/v1/events",tags=["events"]); app.include_router(comm_router,prefix="/api/v1/communication",tags=["communication"]); app.include_router(circular_router,prefix="/api/v1/circulars",tags=["circulars"]); app.include_router(doc_router,prefix="/api/v1/documents",tags=["documents"]); app.include_router(dashboard_router,prefix="/api/v1/dashboard",tags=["dashboard"]); app.include_router(notification_router,prefix="/api/v1/notifications",tags=["notifications"])
 @app.get("/")
-def read_root():
-    return {"message": "Welcome to Sampurna Gnana ERP API"}
-
+def read_root(): return {"message":"Welcome to Sampurna Gnana ERP API"}
 @app.get("/health")
-def health_check():
-    return {"status": "healthy"}
+def health_check(): return {"status":"healthy"}
