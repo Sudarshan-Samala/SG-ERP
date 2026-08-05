@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     TRUSTED_ORIGINS: list[str] = []
     AUTH_LOGIN_RATE_LIMIT: int = 10
     AUTH_REFRESH_RATE_LIMIT: int = 30
+    AUTH_SIGNUP_RATE_LIMIT: int = 5
     AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 60
     BOOTSTRAP_ADMIN_EMAIL: Optional[str] = None
     BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = None
