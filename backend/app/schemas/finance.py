@@ -1,11 +1,13 @@
-from pydantic import BaseModel
-from typing import Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
 
 class AccountBase(BaseModel):
-    name: str
-    type: str # ASSET, LIABILITY, INCOME, EXPENSE
+    name: str = Field(min_length=2, max_length=150)
+    type: Literal["ASSET", "LIABILITY", "INCOME", "EXPENSE", "EQUITY"]
 
 class AccountCreate(AccountBase):
     pass
@@ -13,16 +15,15 @@ class AccountCreate(AccountBase):
 class Account(AccountBase):
     id: UUID
     organization_id: UUID
-
     class Config:
         from_attributes = True
 
 class JournalEntryBase(BaseModel):
     account_id: UUID
     date: datetime
-    description: str
-    amount: int
-    type: str # DEBIT, CREDIT
+    description: str = Field(min_length=2, max_length=500)
+    amount: int = Field(gt=0)
+    type: Literal["DEBIT", "CREDIT"]
 
 class JournalEntryCreate(JournalEntryBase):
     pass
@@ -30,6 +31,5 @@ class JournalEntryCreate(JournalEntryBase):
 class JournalEntry(JournalEntryBase):
     id: UUID
     organization_id: UUID
-
     class Config:
         from_attributes = True
