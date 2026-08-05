@@ -1,11 +1,16 @@
+import json
 from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from app.models.base import Asset, InventoryItem
+from app.models.base import Asset, AuditLog, InventoryItem
 
 
 def get_inventory_items(db, organization_id): return db.query(InventoryItem).filter(InventoryItem.organization_id == organization_id).order_by(InventoryItem.name).all()
 def get_inventory_item(db, organization_id, item_id): return db.query(InventoryItem).filter(InventoryItem.organization_id == organization_id, InventoryItem.id == item_id).first()
+def get_inventory_movements(db, organization_id, item_id=None, limit=100):
+    q=db.query(AuditLog).filter(AuditLog.organization_id==organization_id,AuditLog.entity_type=="inventory_item",AuditLog.action=="stock_adjustment")
+    if item_id:q=q.filter(AuditLog.entity_id==item_id)
+    return q.order_by(AuditLog.created_at.desc()).limit(min(max(limit,1),250)).all()
 
 def _validate_quantity(data):
     quantity=data.get("quantity")
@@ -28,13 +33,15 @@ def update_inventory_item(db,item_id,item_in,organization_id):
     for field,value in data.items():setattr(item,field,value)
     db.commit();db.refresh(item);return item
 
-def adjust_inventory_quantity(db,item_id,delta,organization_id):
+def adjust_inventory_quantity(db,item_id,delta,organization_id,user_id=None):
     if delta == 0: raise HTTPException(status_code=400,detail="Stock adjustment cannot be zero")
     item=db.query(InventoryItem).filter(InventoryItem.organization_id==organization_id,InventoryItem.id==item_id).with_for_update().first()
     if not item:return None
-    new_quantity=item.quantity+delta
+    old_quantity=item.quantity;new_quantity=old_quantity+delta
     if new_quantity<0: raise HTTPException(status_code=409,detail="Stock adjustment would make inventory negative")
-    item.quantity=new_quantity;db.commit();db.refresh(item);return item
+    item.quantity=new_quantity
+    db.add(AuditLog(organization_id=organization_id,user_id=user_id,action="stock_adjustment",entity_type="inventory_item",entity_id=item.id,previous_values=json.dumps({"quantity":old_quantity}),new_values=json.dumps({"quantity":new_quantity,"delta":delta})))
+    db.commit();db.refresh(item);return item
 
 def delete_inventory_item(db,item_id,organization_id):
     item=get_inventory_item(db,organization_id,item_id)
@@ -44,26 +51,20 @@ def delete_inventory_item(db,item_id,organization_id):
 
 def get_assets(db,organization_id):return db.query(Asset).filter(Asset.organization_id==organization_id).order_by(Asset.asset_tag).all()
 def get_asset(db,organization_id,asset_id):return db.query(Asset).filter(Asset.organization_id==organization_id,Asset.id==asset_id).first()
-
 def create_asset(db,asset_in,organization_id):
     data=asset_in.model_dump();data["name"]=data["name"].strip();data["asset_tag"]=data["asset_tag"].strip().upper()
-    try:
-        asset=Asset(**data,organization_id=organization_id);db.add(asset);db.commit();db.refresh(asset);return asset
+    try: asset=Asset(**data,organization_id=organization_id);db.add(asset);db.commit();db.refresh(asset);return asset
     except IntegrityError as exc:db.rollback();raise HTTPException(status_code=409,detail="Asset tag already exists") from exc
-
 def update_asset(db,asset_id,asset_in,organization_id):
     asset=get_asset(db,organization_id,asset_id)
     if not asset:return None
-    data=asset_in.model_dump(exclude_unset=True)
-    requested=data.get("status")
-    allowed={"DEPLOYED":{"DEPLOYED","REPAIR","DISPOSED"},"REPAIR":{"REPAIR","DEPLOYED","DISPOSED"},"DISPOSED":{"DISPOSED"}}
+    data=asset_in.model_dump(exclude_unset=True);requested=data.get("status");allowed={"DEPLOYED":{"DEPLOYED","REPAIR","DISPOSED"},"REPAIR":{"REPAIR","DEPLOYED","DISPOSED"},"DISPOSED":{"DISPOSED"}}
     if requested and requested not in allowed.get(asset.status,{asset.status}):raise HTTPException(status_code=409,detail=f"Invalid asset status transition from {asset.status} to {requested}")
     if "name" in data:data["name"]=data["name"].strip()
     for field,value in data.items():setattr(asset,field,value)
     try:db.commit();db.refresh(asset)
     except IntegrityError as exc:db.rollback();raise HTTPException(status_code=409,detail="Asset tag already exists") from exc
     return asset
-
 def delete_asset(db,asset_id,organization_id):
     asset=get_asset(db,organization_id,asset_id)
     if not asset:return False
