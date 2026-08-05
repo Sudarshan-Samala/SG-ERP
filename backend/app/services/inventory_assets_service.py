@@ -28,6 +28,14 @@ def update_inventory_item(db,item_id,item_in,organization_id):
     for field,value in data.items():setattr(item,field,value)
     db.commit();db.refresh(item);return item
 
+def adjust_inventory_quantity(db,item_id,delta,organization_id):
+    if delta == 0: raise HTTPException(status_code=400,detail="Stock adjustment cannot be zero")
+    item=db.query(InventoryItem).filter(InventoryItem.organization_id==organization_id,InventoryItem.id==item_id).with_for_update().first()
+    if not item:return None
+    new_quantity=item.quantity+delta
+    if new_quantity<0: raise HTTPException(status_code=409,detail="Stock adjustment would make inventory negative")
+    item.quantity=new_quantity;db.commit();db.refresh(item);return item
+
 def delete_inventory_item(db,item_id,organization_id):
     item=get_inventory_item(db,organization_id,item_id)
     if not item:return False
@@ -51,7 +59,6 @@ def update_asset(db,asset_id,asset_in,organization_id):
     allowed={"DEPLOYED":{"DEPLOYED","REPAIR","DISPOSED"},"REPAIR":{"REPAIR","DEPLOYED","DISPOSED"},"DISPOSED":{"DISPOSED"}}
     if requested and requested not in allowed.get(asset.status,{asset.status}):raise HTTPException(status_code=409,detail=f"Invalid asset status transition from {asset.status} to {requested}")
     if "name" in data:data["name"]=data["name"].strip()
-    if "asset_tag" in data:data["asset_tag"]=data["asset_tag"].strip().upper()
     for field,value in data.items():setattr(asset,field,value)
     try:db.commit();db.refresh(asset)
     except IntegrityError as exc:db.rollback();raise HTTPException(status_code=409,detail="Asset tag already exists") from exc
