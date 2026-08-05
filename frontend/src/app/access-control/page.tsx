@@ -1,80 +1,21 @@
 'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import api from '@/lib/api';
-
-type Permission = { id: string; name: string; description?: string };
-type Role = { id: string; name: string; permissions: Permission[] };
-type User = { id: string; email: string; full_name?: string; is_superuser?: boolean; roles?: Role[] };
-
-export default function AccessControlPage() {
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [selectedUser, setSelectedUser] = useState('');
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [roleName, setRoleName] = useState('');
-  const [rolePermissions, setRolePermissions] = useState<string[]>([]);
-  const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  const load = async () => {
-    setLoading(true); setMessage('');
-    try {
-      const [r, p, u] = await Promise.all([api.get('/rbac/'), api.get('/rbac/permissions'), api.get('/users/')]);
-      setRoles(r.data); setPermissions(p.data); setUsers(u.data.filter((user: User) => !user.is_superuser));
-    } catch (error: any) {
-      setMessage(error?.response?.status === 403 ? 'You do not have permission to manage access control.' : 'Unable to load access control data.');
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const permissionGroups = useMemo(() => permissions.reduce<Record<string, Permission[]>>((groups, permission) => {
-    const module = permission.name.split('.')[0].toUpperCase();
-    (groups[module] ||= []).push(permission); return groups;
-  }, {}), [permissions]);
-
-  const chooseUser = (id: string) => {
-    setSelectedUser(id);
-    const user = users.find(item => item.id === id);
-    setSelectedRoles(user?.roles?.map(role => role.id) || []);
-  };
-
-  const createRole = async () => {
-    if (roleName.trim().length < 2) return setMessage('Enter a role name.');
-    try {
-      await api.post('/rbac/', { name: roleName.trim(), permission_names: rolePermissions });
-      setRoleName(''); setRolePermissions([]); setMessage('Role created successfully.'); await load();
-    } catch (error: any) { setMessage(error?.response?.data?.detail || 'Unable to create role.'); }
-  };
-
-  const saveUserRoles = async () => {
-    if (!selectedUser) return setMessage('Select a user first.');
-    try {
-      await api.put(`/rbac/users/${selectedUser}/roles`, { role_ids: selectedRoles });
-      setMessage('User roles updated successfully.'); await load();
-    } catch (error: any) { setMessage(error?.response?.data?.detail || 'Unable to update user roles.'); }
-  };
-
-  if (loading) return <div className="rounded-xl border bg-white p-8 text-slate-500">Loading access control…</div>;
-
-  return <div className="space-y-6">
-    <div><h1 className="text-2xl font-bold text-slate-900">Access Control</h1><p className="mt-1 text-sm text-slate-500">Create tenant roles and assign least-privilege access to ERP users.</p></div>
-    {message && <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">{message}</div>}
-    <div className="grid gap-6 xl:grid-cols-2">
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="font-semibold">Create role</h2>
-        <input className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="Role name" value={roleName} onChange={e => setRoleName(e.target.value)} />
-        <div className="mt-4 space-y-4">{Object.entries(permissionGroups).map(([group, items]) => <div key={group}><div className="mb-2 text-xs font-bold text-slate-400">{group}</div><div className="grid gap-2 sm:grid-cols-2">{items.map(permission => <label key={permission.id} className="flex gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={rolePermissions.includes(permission.name)} onChange={e => setRolePermissions(current => e.target.checked ? [...current, permission.name] : current.filter(x => x !== permission.name))}/><span><b>{permission.name}</b><span className="block text-xs text-slate-500">{permission.description}</span></span></label>)}</div></div>)}</div>
-        <button onClick={createRole} className="mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Create role</button>
-      </section>
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="font-semibold">Assign user roles</h2>
-        <select className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2" value={selectedUser} onChange={e => chooseUser(e.target.value)}><option value="">Select user</option>{users.map(user => <option key={user.id} value={user.id}>{user.full_name || user.email} — {user.email}</option>)}</select>
-        <div className="mt-4 space-y-2">{roles.map(role => <label key={role.id} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3"><input className="mt-1" type="checkbox" checked={selectedRoles.includes(role.id)} onChange={e => setSelectedRoles(current => e.target.checked ? [...current, role.id] : current.filter(x => x !== role.id))}/><span><span className="font-medium">{role.name}</span><span className="block text-xs text-slate-500">{role.permissions?.length || 0} permissions</span></span></label>)}</div>
-        <button onClick={saveUserRoles} className="mt-5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Save assignments</button>
-      </section>
-    </div>
-  </div>;
-}
+import { useEffect,useMemo,useState } from 'react';
+import { Search,ShieldCheck,Trash2,Users } from 'lucide-react';
+import api,{apiErrorMessage} from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { PageHeader } from '@/components/ui/PageHeader';
+type Permission={id:string;name:string;description?:string};type Role={id:string;name:string;permissions:Permission[]};type User={id:string;email:string;full_name?:string;is_superuser?:boolean;roles?:Role[]};
+export default function AccessControlPage(){const{can}=useAuth();const[roles,setRoles]=useState<Role[]>([]);const[permissions,setPermissions]=useState<Permission[]>([]);const[users,setUsers]=useState<User[]>([]);const[selectedUser,setSelectedUser]=useState('');const[selectedRoles,setSelectedRoles]=useState<string[]>([]);const[roleName,setRoleName]=useState('');const[rolePermissions,setRolePermissions]=useState<string[]>([]);const[search,setSearch]=useState('');const[message,setMessage]=useState('');const[error,setError]=useState('');const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);
+ const load=async()=>{setLoading(true);setError('');try{const[r,p,u]=await Promise.all([api.get('/rbac/'),api.get('/rbac/permissions'),api.get('/users/')]);setRoles(r.data);setPermissions(p.data);setUsers(u.data.filter((x:User)=>!x.is_superuser));}catch(e){setError(apiErrorMessage(e,'Unable to load access control data.'));}finally{setLoading(false);}};useEffect(()=>{if(can('rbac.manage'))void load();else setLoading(false);},[can]);
+ const groups=useMemo(()=>permissions.reduce<Record<string,Permission[]>>((g,p)=>{const k=p.name.split('.')[0].toUpperCase();(g[k]||=[]).push(p);return g;},{}),[permissions]);const filteredRoles=roles.filter(r=>r.name.toLowerCase().includes(search.toLowerCase()));
+ const chooseUser=(id:string)=>{setSelectedUser(id);setSelectedRoles(users.find(u=>u.id===id)?.roles?.map(r=>r.id)||[])};
+ const createRole=async()=>{setMessage('');setError('');if(roleName.trim().length<2)return setError('Role name must contain at least 2 characters.');setSaving(true);try{await api.post('/rbac/',{name:roleName.trim(),permission_names:rolePermissions});setRoleName('');setRolePermissions([]);setMessage('Role created successfully.');await load();}catch(e){setError(apiErrorMessage(e,'Unable to create role.'));}finally{setSaving(false)}};
+ const save=async()=>{if(!selectedUser)return setError('Select a user first.');setSaving(true);setError('');try{await api.put(`/rbac/users/${selectedUser}/roles`,{role_ids:selectedRoles});setMessage('User roles updated successfully.');await load();}catch(e){setError(apiErrorMessage(e,'Unable to update roles.'));}finally{setSaving(false)}};
+ const remove=async(role:Role)=>{if(!confirm(`Delete role “${role.name}”? Roles assigned to users cannot be deleted.`))return;setError('');try{await api.delete(`/rbac/${role.id}`);setMessage('Role deleted.');await load();}catch(e){setError(apiErrorMessage(e,'Unable to delete role.'));}};
+ if(!can('rbac.manage'))return <div className="card p-8"><h1 className="font-semibold">Access denied</h1><p className="mt-2 text-sm text-slate-500">You do not have permission to manage roles and permissions.</p></div>;
+ return <div className="space-y-6"><PageHeader title="Access Control" description="Manage least-privilege roles and user assignments inside your organization."/>{error&&<div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}{message&&<div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{message}</div>}
+ <div className="grid gap-4 sm:grid-cols-3"><Metric label="Roles" value={roles.length} icon={<ShieldCheck size={20}/>}/><Metric label="Permissions" value={permissions.length} icon={<ShieldCheck size={20}/>}/><Metric label="Managed users" value={users.length} icon={<Users size={20}/>}/></div>
+ <div className="grid gap-6 xl:grid-cols-2"><section className="card p-5"><h2 className="font-semibold">Create role</h2><input className="input mt-4" placeholder="Role name" value={roleName} onChange={e=>setRoleName(e.target.value)}/><div className="mt-4 max-h-[460px] space-y-4 overflow-y-auto pr-1">{loading?<p className="text-sm text-slate-500">Loading permissions…</p>:Object.entries(groups).map(([group,items])=><div key={group}><div className="mb-2 text-xs font-bold text-slate-400">{group}</div><div className="grid gap-2 sm:grid-cols-2">{items.map(p=><label key={p.id} className="flex gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={rolePermissions.includes(p.name)} onChange={e=>setRolePermissions(c=>e.target.checked?[...c,p.name]:c.filter(x=>x!==p.name))}/><span><b>{p.name}</b><span className="block text-xs text-slate-500">{p.description}</span></span></label>)}</div></div>)}</div><button disabled={saving} onClick={()=>void createRole()} className="btn-primary mt-5">{saving?'Saving…':'Create role'}</button></section>
+ <section className="card p-5"><h2 className="font-semibold">Assign user roles</h2><select className="input mt-4" value={selectedUser} onChange={e=>chooseUser(e.target.value)}><option value="">Select user</option>{users.map(u=><option key={u.id} value={u.id}>{u.full_name||u.email} — {u.email}</option>)}</select><div className="mt-4 max-h-[460px] space-y-2 overflow-y-auto">{roles.map(r=><label key={r.id} className="flex items-start gap-3 rounded-lg border p-3"><input className="mt-1" type="checkbox" checked={selectedRoles.includes(r.id)} onChange={e=>setSelectedRoles(c=>e.target.checked?[...c,r.id]:c.filter(x=>x!==r.id))}/><span><span className="font-medium">{r.name}</span><span className="block text-xs text-slate-500">{r.permissions.length} permissions</span></span></label>)}</div><button disabled={saving||!selectedUser} onClick={()=>void save()} className="btn-primary mt-5">Save assignments</button></section></div>
+ <section className="card p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold">Role Directory</h2><p className="text-sm text-slate-500">Review and remove unused tenant roles.</p></div><div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" placeholder="Search roles" value={search} onChange={e=>setSearch(e.target.value)}/></div></div><div className="mt-4 table-wrap"><table className="data-table"><thead><tr><th>Role</th><th>Permissions</th><th className="text-right">Action</th></tr></thead><tbody>{filteredRoles.length?filteredRoles.map(r=><tr key={r.id}><td className="font-medium">{r.name}</td><td>{r.permissions.length}</td><td className="text-right"><button onClick={()=>void remove(r)} className="inline-flex items-center gap-1 text-sm font-medium text-red-600"><Trash2 size={15}/>Delete</button></td></tr>):<tr><td colSpan={3} className="py-8 text-center text-slate-500">No roles found.</td></tr>}</tbody></table></div></section></div>}
+function Metric({label,value,icon}:{label:string;value:number;icon:React.ReactNode}){return <div className="card p-5"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div><div className="rounded-lg bg-slate-100 p-2 text-slate-600">{icon}</div></div></div>}
