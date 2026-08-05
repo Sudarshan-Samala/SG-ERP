@@ -1,4 +1,5 @@
 PERMISSIONS = {
+    "rbac.manage": "Manage tenant roles and user role assignments",
     "fees.read": "View fee types, structures, invoices and payments",
     "fees.manage": "Manage fee types and fee structures",
     "fees.invoice.create": "Create student fee invoices",
@@ -24,8 +25,6 @@ PERMISSIONS = {
     "helpdesk.ticket.create": "Create helpdesk tickets",
 }
 
-# Conservative built-in roles. New permissions are never automatically granted
-# to non-admin roles: they must be intentionally added here or through role management.
 ROLE_PERMISSION_SETS = {
     "ERP Admin": set(PERMISSIONS),
     "Finance Manager": {"fees.read", "fees.manage", "fees.invoice.create", "fees.payment.collect"},
