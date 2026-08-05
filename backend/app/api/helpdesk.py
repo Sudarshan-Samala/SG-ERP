@@ -12,7 +12,8 @@ router = APIRouter()
 
 @router.get("/", response_model=List[Ticket])
 def read_tickets(db: Session = Depends(get_db), current_user: User = Depends(require_permission("helpdesk.read"))):
-    return get_tickets(db, current_user.organization_id)
+    can_manage = current_user.is_superuser or any(permission.name == "helpdesk.manage" for role in current_user.roles for permission in role.permissions)
+    return get_tickets(db, current_user.organization_id, None if can_manage else current_user.id)
 
 @router.post("/", response_model=Ticket)
 def create_ticket_endpoint(ticket_in: TicketCreate, db: Session = Depends(get_db), current_user: User = Depends(require_permission("helpdesk.ticket.create"))):
