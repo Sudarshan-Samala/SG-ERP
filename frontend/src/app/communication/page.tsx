@@ -1,57 +1,21 @@
 'use client';
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { Mail, MessageSquare, Plus, Search, Send } from 'lucide-react';
+import api,{apiErrorMessage} from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
 
-export default function CommunicationPage() {
-  const [comms, setComms] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [recipient_type, setRecipientType] = useState('ALL');
-  const [channel, setChannel] = useState('IN_APP');
-  const [content, setContent] = useState('');
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/communication/');
-      setComms(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const sendComm = async () => {
-    await api.post('/communication/', { recipient_type, channel, content });
-    setContent('');
-    fetchData();
-  };
-
-  if (loading) return <div>Loading...</div>;
-
-  return (
-    <div className="p-4">
-      <h1 className="text-xl font-bold">Communication Hub</h1>
-      <div className="mt-4 grid grid-cols-1 gap-2">
-        <select value={recipient_type} onChange={e => setRecipientType(e.target.value)} className="border p-2">
-            <option value="ALL">All</option>
-            <option value="GRADE">Grade</option>
-            <option value="BRANCH">Branch</option>
-        </select>
-        <select value={channel} onChange={e => setChannel(e.target.value)} className="border p-2">
-            <option value="IN_APP">In App</option>
-            <option value="SMS">SMS</option>
-            <option value="EMAIL">Email</option>
-        </select>
-        <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Content" className="border p-2" />
-        <button onClick={sendComm} className="bg-green-500 text-white p-2">Send Communication</button>
-      </div>
-      <ul className="mt-4">
-        {comms.map((c: any) => <li key={c.id} className="border-b p-2">{c.content} - {c.status}</li>)}
-      </ul>
-    </div>
-  );
+type Comm={id:string;recipient_type:string;channel:string;content:string;status:string;created_at?:string};
+export default function CommunicationPage(){
+ const {can}=useAuth(); const [comms,setComms]=useState<Comm[]>([]); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [error,setError]=useState(''); const [success,setSuccess]=useState(''); const [search,setSearch]=useState(''); const [recipient_type,setRecipientType]=useState('ALL'); const [channel,setChannel]=useState('IN_APP'); const [content,setContent]=useState(''); const canManage=can('communication.manage');
+ const load=async()=>{setLoading(true);setError('');try{setComms((await api.get('/communication/')).data);}catch(e){setError(apiErrorMessage(e,'Unable to load communications.'));}finally{setLoading(false);}}; useEffect(()=>{void load();},[]);
+ const visible=useMemo(()=>{const q=search.trim().toLowerCase();return q?comms.filter(c=>`${c.content} ${c.channel} ${c.status} ${c.recipient_type}`.toLowerCase().includes(q)):comms;},[comms,search]); const sent=comms.filter(c=>c.status==='SENT').length; const pending=comms.filter(c=>c.status!=='SENT').length;
+ const sendComm=async()=>{setError('');setSuccess('');const clean=content.trim();if(!clean)return setError('Communication content is required.');if(clean.length>5000)return setError('Communication content must be 5,000 characters or less.');setSaving(true);try{await api.post('/communication/',{recipient_type,channel,content:clean});setContent('');setSuccess('Communication created successfully.');await load();}catch(e){setError(apiErrorMessage(e,'Unable to create communication.'));}finally{setSaving(false);}};
+ return <div className="space-y-6"><PageHeader title="Communication Hub" description="Create and track school communications from one permission-aware workspace."/>
+ <div className="grid gap-4 sm:grid-cols-3"><Stat label="Total" value={comms.length} icon={<MessageSquare size={20}/>}/><Stat label="Sent" value={sent} icon={<Send size={20}/>}/><Stat label="Pending" value={pending} icon={<Mail size={20}/>}/></div>
+ {error&&<Alert error>{error}</Alert>}{success&&<Alert>{success}</Alert>}
+ {canManage&&<div className="card p-5"><div className="mb-4"><h2 className="font-semibold text-slate-900">New Communication</h2><p className="text-sm text-slate-500">Choose the audience and delivery channel, then compose the message.</p></div><div className="grid gap-4 md:grid-cols-2"><Field label="Audience"><select className="input" value={recipient_type} onChange={e=>setRecipientType(e.target.value)}><option value="ALL">All</option><option value="GRADE">Grade</option><option value="BRANCH">Branch</option></select></Field><Field label="Channel"><select className="input" value={channel} onChange={e=>setChannel(e.target.value)}><option value="IN_APP">In App</option><option value="SMS">SMS</option><option value="EMAIL">Email</option></select></Field></div><Field label="Message"><textarea className="input mt-1 min-h-28" value={content} maxLength={5000} onChange={e=>setContent(e.target.value)} placeholder="Write communication content..."/><div className="mt-1 text-right text-xs text-slate-400">{content.length}/5000</div></Field><div className="flex justify-end"><Button onClick={sendComm} disabled={saving}><Plus size={17}/>{saving?'Creating...':'Create Communication'}</Button></div></div>}
+ <div><div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="font-semibold">Communication History</h2><p className="text-sm text-slate-500">Review delivery channel, audience and current status.</p></div><div className="relative sm:w-80"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search communications..."/></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Message</th><th>Audience</th><th>Channel</th><th>Status</th></tr></thead><tbody>{loading?<tr><td colSpan={4} className="py-10 text-center">Loading communications...</td></tr>:visible.length===0?<tr><td colSpan={4} className="py-12 text-center text-slate-500">No communications found.</td></tr>:visible.map(c=><tr key={c.id}><td className="max-w-xl font-medium text-slate-900"><span className="line-clamp-2">{c.content}</span></td><td>{c.recipient_type}</td><td>{c.channel.replace('_',' ')}</td><td><Badge status={c.status}/></td></tr>)}</tbody></table></div></div></div>;
 }
+function Field({label,children}:{label:string;children:React.ReactNode}){return <div className="mb-4"><label className="label">{label}</label>{children}</div>}; function Stat({label,value,icon}:{label:string;value:number;icon:React.ReactNode}){return <div className="card flex items-center justify-between p-5"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div><div className="rounded-lg bg-slate-100 p-3 text-slate-600">{icon}</div></div>}; function Alert({children,error=false}:{children:React.ReactNode;error?:boolean}){return <div className={`rounded-md border px-4 py-3 text-sm ${error?'border-red-200 bg-red-50 text-red-700':'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{children}</div>}; function Badge({status}:{status:string}){return <span className={status==='SENT'?'badge-success':status==='FAILED'?'badge-danger':'badge-warning'}>{status}</span>}

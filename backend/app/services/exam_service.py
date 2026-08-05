@@ -22,6 +22,8 @@ def create_exam(db,exam_in,organization_id,user_id):
 def delete_exam(db,exam_id,organization_id,user_id):
     exam=db.query(Exam).filter(Exam.id==exam_id,Exam.organization_id==organization_id).first()
     if not exam:return None
+    if db.query(ExamSchedule.id).filter(ExamSchedule.organization_id==organization_id,ExamSchedule.exam_id==exam_id).first():raise HTTPException(status_code=409,detail="Exam cannot be deleted while schedules exist")
+    if db.query(ExamResult.id).filter(ExamResult.organization_id==organization_id,ExamResult.exam_id==exam_id).first():raise HTTPException(status_code=409,detail="Exam cannot be deleted while results exist")
     db.delete(exam);db.commit();log_action(db,organization_id,user_id,"DELETE","EXAM",exam_id);return True
 def get_exam_schedules(db,organization_id,exam_id=None):
     q=db.query(ExamSchedule).filter(ExamSchedule.organization_id==organization_id);return q.filter(ExamSchedule.exam_id==exam_id).all() if exam_id else q.all()
