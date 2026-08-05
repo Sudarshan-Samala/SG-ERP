@@ -1,12 +1,13 @@
-from pydantic import BaseModel
-from typing import Optional
 from uuid import UUID
+
+from pydantic import BaseModel, Field, model_validator
+
 
 class EmployeeBase(BaseModel):
     user_id: UUID
-    employee_id: str
-    department: str
-    designation: str
+    employee_id: str = Field(min_length=1, max_length=50)
+    department: str = Field(min_length=2, max_length=100)
+    designation: str = Field(min_length=2, max_length=100)
 
 class EmployeeCreate(EmployeeBase):
     pass
@@ -14,14 +15,13 @@ class EmployeeCreate(EmployeeBase):
 class Employee(EmployeeBase):
     id: UUID
     organization_id: UUID
-
     class Config:
         from_attributes = True
 
 class SalaryStructureBase(BaseModel):
     employee_id: UUID
-    basic_salary: int
-    hra: int
+    basic_salary: int = Field(ge=0)
+    hra: int = Field(ge=0)
 
 class SalaryStructureCreate(SalaryStructureBase):
     pass
@@ -29,15 +29,14 @@ class SalaryStructureCreate(SalaryStructureBase):
 class SalaryStructure(SalaryStructureBase):
     id: UUID
     organization_id: UUID
-
     class Config:
         from_attributes = True
 
 class PayrollBase(BaseModel):
     employee_id: UUID
-    month: int
-    year: int
-    net_salary: int
+    month: int = Field(ge=1, le=12)
+    year: int = Field(ge=2000, le=2200)
+    net_salary: int = Field(ge=0)
 
 class PayrollCreate(PayrollBase):
     pass
@@ -45,6 +44,5 @@ class PayrollCreate(PayrollBase):
 class Payroll(PayrollBase):
     id: UUID
     organization_id: UUID
-
     class Config:
         from_attributes = True
