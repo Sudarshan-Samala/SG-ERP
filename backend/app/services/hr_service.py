@@ -1,12 +1,11 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.base import Employee, Payroll, SalaryStructure, User
-from app.schemas.hr import EmployeeCreate, PayrollCreate, SalaryStructureCreate
 from app.services.audit.audit_service import log_action
 
 
@@ -36,13 +35,16 @@ def create_employee(db, emp_in, organization_id, user_id):
 def get_salary_structures(db, organization_id, employee_id=None):
     query = db.query(SalaryStructure).filter(SalaryStructure.organization_id == organization_id)
     if employee_id: query = query.filter(SalaryStructure.employee_id == employee_id)
-    return query.all()
+    return query.order_by(SalaryStructure.employee_id).all()
 
 
 def create_salary_structure(db, struct_in, organization_id, user_id):
     _require_employee(db, struct_in.employee_id, organization_id)
-    if getattr(struct_in, "basic_salary", 0) < 0: raise HTTPException(status_code=400, detail="Basic salary cannot be negative")
-    ss = SalaryStructure(**struct_in.model_dump(), organization_id=organization_id); db.add(ss); db.commit(); db.refresh(ss)
+    existing = db.query(SalaryStructure).filter(SalaryStructure.organization_id == organization_id, SalaryStructure.employee_id == struct_in.employee_id).first()
+    if existing: raise HTTPException(status_code=409, detail="Salary structure already exists for this employee")
+    ss = SalaryStructure(**struct_in.model_dump(), organization_id=organization_id); db.add(ss)
+    try: db.commit(); db.refresh(ss)
+    except IntegrityError as exc: db.rollback(); raise HTTPException(status_code=409, detail="Salary structure already exists for this employee") from exc
     log_action(db, organization_id, user_id, "CREATE", "SALARY_STRUCTURE", ss.id, new_values=str(struct_in.model_dump())); return ss
 
 
@@ -54,8 +56,9 @@ def get_payrolls(db, organization_id, employee_id=None):
 
 def create_payroll(db, payroll_in, organization_id, user_id):
     _require_employee(db, payroll_in.employee_id, organization_id)
-    if not 1 <= payroll_in.month <= 12: raise HTTPException(status_code=400, detail="Payroll month must be between 1 and 12")
-    if payroll_in.year < 2000 or payroll_in.year > 2100: raise HTTPException(status_code=400, detail="Payroll year is invalid")
+    salary = db.query(SalaryStructure).filter(SalaryStructure.organization_id == organization_id, SalaryStructure.employee_id == payroll_in.employee_id).first()
+    if not salary: raise HTTPException(status_code=409, detail="Create a salary structure before payroll")
+    if payroll_in.net_salary > salary.basic_salary + salary.hra: raise HTTPException(status_code=400, detail="Net salary cannot exceed configured gross salary")
     existing = db.query(Payroll).filter(Payroll.organization_id == organization_id, Payroll.employee_id == payroll_in.employee_id, Payroll.month == payroll_in.month, Payroll.year == payroll_in.year).first()
     if existing: raise HTTPException(status_code=409, detail="Payroll already exists for this employee and period")
     py = Payroll(**payroll_in.model_dump(), organization_id=organization_id); db.add(py)
