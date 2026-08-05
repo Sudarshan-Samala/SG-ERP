@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -42,3 +43,18 @@ def require_permission(permission_name: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permission")
         return current_user
     return dependency
+
+
+def accessible_branch_ids(current_user: User) -> set[UUID]:
+    """Return explicitly assigned branches. Superusers are unrestricted."""
+    if current_user.is_superuser:
+        return set()
+    return {branch.id for branch in current_user.branches if branch.organization_id == current_user.organization_id}
+
+
+def enforce_branch_access(current_user: User, branch_id: UUID) -> None:
+    """Default-deny branch authorization for non-superusers."""
+    if current_user.is_superuser:
+        return
+    if branch_id not in accessible_branch_ids(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch access denied")
