@@ -15,18 +15,22 @@ ALLOWED_TRANSITIONS = {
 
 
 def create_communication(db: Session, comm_in, organization_id: UUID):
-    # Creating a record must not falsely claim that an external provider delivered it.
+    # A local record starts as DRAFT; provider delivery must be confirmed separately.
     comm = Communication(**comm_in.model_dump(), organization_id=organization_id, status="DRAFT")
     db.add(comm); db.commit(); db.refresh(comm)
     return comm
 
 
 def get_communications(db: Session, organization_id: UUID):
-    return db.query(Communication).filter(Communication.organization_id == organization_id).all()
+    return db.query(Communication).filter(Communication.organization_id == organization_id).order_by(Communication.id.desc()).all()
 
 
 def update_communication_status(db: Session, communication_id: UUID, new_status: str, organization_id: UUID):
-    comm = db.query(Communication).filter(Communication.id == communication_id, Communication.organization_id == organization_id).first()
+    # Serialize state changes so two managers cannot race the workflow.
+    comm = db.query(Communication).filter(
+        Communication.id == communication_id,
+        Communication.organization_id == organization_id,
+    ).with_for_update().first()
     if not comm:
         return None
     if new_status not in ALLOWED_TRANSITIONS.get(comm.status, set()):
