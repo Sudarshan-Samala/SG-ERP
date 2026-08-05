@@ -37,6 +37,8 @@ def create_exam_schedule(db,schedule_in,organization_id,user_id):
     if schedule_in.max_marks<=0:raise HTTPException(status_code=400,detail="Maximum marks must be greater than zero")
     duplicate=db.query(ExamSchedule).filter(ExamSchedule.organization_id==organization_id,ExamSchedule.exam_id==schedule_in.exam_id,ExamSchedule.subject_id==schedule_in.subject_id,ExamSchedule.grade_id==schedule_in.grade_id).first()
     if duplicate:raise HTTPException(status_code=409,detail="Exam schedule already exists for this subject and grade")
+    grade_conflict=db.query(ExamSchedule).filter(ExamSchedule.organization_id==organization_id,ExamSchedule.exam_id==schedule_in.exam_id,ExamSchedule.grade_id==schedule_in.grade_id,ExamSchedule.date==schedule_in.date).first()
+    if grade_conflict:raise HTTPException(status_code=409,detail="This grade already has an exam scheduled at this date and time")
     obj=ExamSchedule(**schedule_in.model_dump(),organization_id=organization_id);db.add(obj);db.commit();db.refresh(obj);log_action(db,organization_id,user_id,"CREATE","EXAM_SCHEDULE",obj.id,new_values=str(schedule_in.model_dump()));return obj
 def get_exam_results(db,organization_id,exam_id=None,student_id=None,branch_ids:set[UUID]|None=None):
     q=db.query(ExamResult).join(Student,Student.id==ExamResult.student_id).filter(ExamResult.organization_id==organization_id,Student.organization_id==organization_id)
@@ -45,7 +47,7 @@ def get_exam_results(db,organization_id,exam_id=None,student_id=None,branch_ids:
         q=q.filter(Student.branch_id.in_(branch_ids))
     if exam_id:q=q.filter(ExamResult.exam_id==exam_id)
     if student_id:q=q.filter(ExamResult.student_id==student_id)
-    return q.all()
+    return q.order_by(ExamResult.exam_id,ExamResult.student_id,ExamResult.subject_id).all()
 def create_exam_result(db,result_in:ExamResultCreate,organization_id,user_id):
     _require_owned(db,Exam,result_in.exam_id,organization_id,"Exam");student=_require_owned(db,Student,result_in.student_id,organization_id,"Student");_require_owned(db,Subject,result_in.subject_id,organization_id,"Subject")
     if result_in.marks_obtained<0:raise HTTPException(status_code=400,detail="Marks obtained cannot be negative")
