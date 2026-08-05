@@ -1,109 +1,25 @@
 'use client';
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { CalendarDays, Plus, Search, Trash2 } from 'lucide-react';
+import api, { apiErrorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 
-export default function ExamsPage() {
-  const [exams, setExams] = useState<any[]>([]);
-  const [examTypes, setExamTypes] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState<{isOpen: boolean, id?: string}>({isOpen: false});
-  
-  // New state for form
-  const [formData, setFormData] = useState({
-      name: '',
-      exam_type_id: '',
-      start_date: '',
-      end_date: ''
-  });
+interface Exam { id:string; name:string; exam_type_id:string; start_date:string; end_date:string }
+interface ExamType { id:string; name:string }
+const emptyForm={name:'',exam_type_id:'',start_date:'',end_date:''};
 
-  const fetchData = async () => {
-    setLoading(true);
-    const [examsRes, typesRes] = await Promise.all([
-        api.get('/exams/'),
-        api.get('/exams/types')
-    ]);
-    setExams(examsRes.data);
-    setExamTypes(typesRes.data);
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const handleSubmit = async () => {
-    await api.post('/exams/', formData);
-    setIsModalOpen(false);
-    setFormData({ name: '', exam_type_id: '', start_date: '', end_date: '' });
-    fetchData();
-  };
-
-  if (loading) return <div className="p-6"><LoadingSkeleton /></div>;
-
-  return (
-    <div className="p-6">
-      <PageHeader 
-        title="Exams" 
-        description="Manage school exams."
-        action={<Button onClick={() => setIsModalOpen(true)}>Add Exam</Button>}
-      />
-
-      <div className="bg-white rounded-lg shadow-sm border mt-6">
-        <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-                <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Date</th>
-                    <th className="px-6 py-3"></th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-                {exams.map((e: any) => (
-                <tr key={e.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{e.name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {examTypes.find(t => t.id === e.exam_type_id)?.name || e.exam_type_id}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(e.start_date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(e.end_date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 text-right text-sm font-medium">
-                        <button onClick={() => setConfirmDialog({isOpen: true, id: e.id})} className="text-red-600 hover:text-red-900">Delete</button>
-                    </td>
-                </tr>
-                ))}
-            </tbody>
-        </table>
-      </div>
-
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add Exam">
-        <div className="space-y-4">
-            <input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Exam Name" className="w-full border border-gray-300 rounded-md p-2" />
-            <select value={formData.exam_type_id} onChange={e => setFormData({...formData, exam_type_id: e.target.value})} className="w-full border border-gray-300 rounded-md p-2">
-                <option value="">Select Exam Type</option>
-                {examTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            <input type="date" value={formData.start_date} onChange={e => setFormData({...formData, start_date: e.target.value})} className="w-full border border-gray-300 rounded-md p-2" />
-            <input type="date" value={formData.end_date} onChange={e => setFormData({...formData, end_date: e.target.value})} className="w-full border border-gray-300 rounded-md p-2" />
-            <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-                <Button onClick={handleSubmit}>Create</Button>
-            </div>
-        </div>
-      </Modal>
-
-      <ConfirmDialog 
-        isOpen={confirmDialog.isOpen} 
-        onClose={() => setConfirmDialog({isOpen: false})} 
-        onConfirm={async () => { await api.delete(`/exams/${confirmDialog.id}`); setConfirmDialog({isOpen: false}); fetchData(); }}
-        title="Delete Exam"
-        message="Are you sure you want to delete this exam?"
-      />
-    </div>
-  );
+export default function ExamsPage(){
+ const {can}=useAuth(); const [exams,setExams]=useState<Exam[]>([]); const [types,setTypes]=useState<ExamType[]>([]); const [loading,setLoading]=useState(true); const [modal,setModal]=useState(false); const [confirm,setConfirm]=useState<{isOpen:boolean,id?:string}>({isOpen:false}); const [form,setForm]=useState(emptyForm); const [search,setSearch]=useState(''); const [error,setError]=useState(''); const [saving,setSaving]=useState(false); const canManage=can('exam.manage');
+ const fetchData=async()=>{setLoading(true);setError('');try{const[e,t]=await Promise.all([api.get('/exams/'),api.get('/exams/types')]);setExams(e.data);setTypes(t.data);}catch(err){setError(apiErrorMessage(err,'Unable to load examinations.'));}finally{setLoading(false);}};
+ useEffect(()=>{void fetchData();},[]);
+ const visible=useMemo(()=>{const q=search.trim().toLowerCase();return q?exams.filter(e=>e.name.toLowerCase().includes(q)):exams;},[exams,search]);
+ const submit=async()=>{setError('');if(!form.name.trim()||!form.exam_type_id||!form.start_date||!form.end_date)return setError('Complete all exam fields.');if(form.end_date<form.start_date)return setError('End date cannot be before start date.');setSaving(true);try{await api.post('/exams/',form);setModal(false);setForm(emptyForm);await fetchData();}catch(err){setError(apiErrorMessage(err,'Unable to create exam.'));}finally{setSaving(false);}};
+ if(loading)return <div className="p-6"><LoadingSkeleton/></div>;
+ return <div className="space-y-6"><PageHeader title="Examinations" description="Plan exam periods and manage assessment windows." action={canManage?<Button onClick={()=>setModal(true)}><Plus size={17}/>Add Exam</Button>:undefined}/>{error&&<div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}<div className="card p-4"><div className="relative max-w-md"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search examinations..."/></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Name</th><th>Exam Type</th><th>Start</th><th>End</th>{canManage&&<th className="text-right">Actions</th>}</tr></thead><tbody>{visible.length===0?<tr><td colSpan={canManage?5:4}><div className="py-14 text-center text-slate-500"><CalendarDays size={32} className="mx-auto mb-3 text-slate-300"/><p className="font-medium">No examinations found</p><p className="mt-1 text-sm">{search?'Try a different search.':'No examination periods have been configured yet.'}</p></div></td></tr>:visible.map(e=><tr key={e.id}><td className="font-medium text-slate-900">{e.name}</td><td>{types.find(t=>t.id===e.exam_type_id)?.name||'—'}</td><td>{new Date(e.start_date).toLocaleDateString()}</td><td>{new Date(e.end_date).toLocaleDateString()}</td>{canManage&&<td><div className="flex justify-end"><button onClick={()=>setConfirm({isOpen:true,id:e.id})} className="rounded-md p-2 text-slate-500 hover:bg-red-50 hover:text-red-600" title="Delete exam"><Trash2 size={16}/></button></div></td>}</tr>)}</tbody></table></div><Modal isOpen={modal} onClose={()=>!saving&&setModal(false)} title="Add Examination"><div className="space-y-4"><Field label="Exam name"><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></Field><Field label="Exam type"><select className="input" value={form.exam_type_id} onChange={e=>setForm({...form,exam_type_id:e.target.value})}><option value="">Select exam type</option>{types.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Start date"><input type="date" className="input" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})}/></Field><Field label="End date"><input type="date" min={form.start_date||undefined} className="input" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})}/></Field></div><div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setModal(false)} disabled={saving}>Cancel</Button><Button onClick={submit} disabled={saving}>{saving?'Creating...':'Create Exam'}</Button></div></div></Modal><ConfirmDialog isOpen={confirm.isOpen} onClose={()=>setConfirm({isOpen:false})} onConfirm={async()=>{try{await api.delete(`/exams/${confirm.id}`);setConfirm({isOpen:false});await fetchData();}catch(err){setError(apiErrorMessage(err,'Unable to delete exam.'));}}} title="Delete Exam" message="Delete this exam? This action cannot be undone."/></div>;
 }
+function Field({label,children}:{label:string;children:React.ReactNode}){return <div><label className="label">{label}</label>{children}</div>}
