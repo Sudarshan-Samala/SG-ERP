@@ -9,67 +9,56 @@ from app.models.base import Asset, InventoryItem
 from app.schemas.inventory_assets import AssetCreate, AssetUpdate, InventoryItemCreate, InventoryItemUpdate
 
 
-def get_inventory_items(db: Session, organization_id: UUID) -> List[InventoryItem]:
-    return db.query(InventoryItem).filter(InventoryItem.organization_id == organization_id).all()
+def get_inventory_items(db, organization_id): return db.query(InventoryItem).filter(InventoryItem.organization_id == organization_id).order_by(InventoryItem.name).all()
+def get_inventory_item(db, organization_id, item_id): return db.query(InventoryItem).filter(InventoryItem.organization_id == organization_id, InventoryItem.id == item_id).first()
 
 
-def get_inventory_item(db: Session, organization_id: UUID, item_id: UUID) -> Optional[InventoryItem]:
-    return db.query(InventoryItem).filter(InventoryItem.organization_id == organization_id, InventoryItem.id == item_id).first()
+def _validate_quantity(data):
+    quantity = data.get("quantity")
+    if quantity is not None and quantity < 0: raise HTTPException(status_code=400, detail="Inventory quantity cannot be negative")
 
 
-def create_inventory_item(db: Session, item_in: InventoryItemCreate, organization_id: UUID) -> InventoryItem:
-    item = InventoryItem(**item_in.model_dump(), organization_id=organization_id)
-    db.add(item); db.commit(); db.refresh(item)
-    return item
+def create_inventory_item(db, item_in, organization_id):
+    data = item_in.model_dump(); _validate_quantity(data)
+    item = InventoryItem(**data, organization_id=organization_id); db.add(item); db.commit(); db.refresh(item); return item
 
 
-def update_inventory_item(db: Session, item_id: UUID, item_in: InventoryItemUpdate, organization_id: UUID) -> Optional[InventoryItem]:
+def update_inventory_item(db, item_id, item_in, organization_id):
     item = get_inventory_item(db, organization_id, item_id)
     if not item: return None
-    for field, value in item_in.model_dump(exclude_unset=True).items(): setattr(item, field, value)
-    db.commit(); db.refresh(item)
-    return item
+    data = item_in.model_dump(exclude_unset=True); _validate_quantity(data)
+    for field, value in data.items(): setattr(item, field, value)
+    db.commit(); db.refresh(item); return item
 
 
-def delete_inventory_item(db: Session, item_id: UUID, organization_id: UUID) -> bool:
+def delete_inventory_item(db, item_id, organization_id):
     item = get_inventory_item(db, organization_id, item_id)
     if not item: return False
-    db.delete(item); db.commit()
-    return True
+    db.delete(item); db.commit(); return True
 
 
-def get_assets(db: Session, organization_id: UUID) -> List[Asset]:
-    return db.query(Asset).filter(Asset.organization_id == organization_id).all()
+def get_assets(db, organization_id): return db.query(Asset).filter(Asset.organization_id == organization_id).order_by(Asset.asset_tag).all()
+def get_asset(db, organization_id, asset_id): return db.query(Asset).filter(Asset.organization_id == organization_id, Asset.id == asset_id).first()
 
 
-def get_asset(db: Session, organization_id: UUID, asset_id: UUID) -> Optional[Asset]:
-    return db.query(Asset).filter(Asset.organization_id == organization_id, Asset.id == asset_id).first()
-
-
-def create_asset(db: Session, asset_in: AssetCreate, organization_id: UUID) -> Asset:
+def create_asset(db, asset_in, organization_id):
     try:
-        asset = Asset(**asset_in.model_dump(), organization_id=organization_id)
-        db.add(asset); db.commit(); db.refresh(asset)
-        return asset
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Asset tag already exists") from exc
+        asset = Asset(**asset_in.model_dump(), organization_id=organization_id); db.add(asset); db.commit(); db.refresh(asset); return asset
+    except IntegrityError as exc: db.rollback(); raise HTTPException(status_code=409, detail="Asset tag already exists") from exc
 
 
-def update_asset(db: Session, asset_id: UUID, asset_in: AssetUpdate, organization_id: UUID) -> Optional[Asset]:
+def update_asset(db, asset_id, asset_in, organization_id):
     asset = get_asset(db, organization_id, asset_id)
     if not asset: return None
-    if asset.status == "DISPOSED" and asset_in.status and asset_in.status != "DISPOSED":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Disposed assets cannot be reactivated")
+    if asset.status == "DISPOSED" and asset_in.status and asset_in.status != "DISPOSED": raise HTTPException(status_code=409, detail="Disposed assets cannot be reactivated")
     for field, value in asset_in.model_dump(exclude_unset=True).items(): setattr(asset, field, value)
-    db.commit(); db.refresh(asset)
+    try: db.commit(); db.refresh(asset)
+    except IntegrityError as exc: db.rollback(); raise HTTPException(status_code=409, detail="Asset tag already exists") from exc
     return asset
 
 
-def delete_asset(db: Session, asset_id: UUID, organization_id: UUID) -> bool:
+def delete_asset(db, asset_id, organization_id):
     asset = get_asset(db, organization_id, asset_id)
     if not asset: return False
-    if asset.status == "DEPLOYED":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Deployed assets cannot be deleted")
-    db.delete(asset); db.commit()
-    return True
+    if asset.status == "DEPLOYED": raise HTTPException(status_code=409, detail="Deployed assets cannot be deleted")
+    db.delete(asset); db.commit(); return True
