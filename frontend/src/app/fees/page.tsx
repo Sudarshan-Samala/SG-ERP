@@ -1,103 +1,17 @@
 'use client';
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { IndianRupee, Plus, ReceiptText, Search } from 'lucide-react';
+import api, { apiErrorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
-
-interface Student { id: string; student_name: string; }
-interface Invoice { id: string; student_id: string; amount_due: number; due_date: string; status: string; }
-
-export default function FeesPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  
-  const [formData, setFormData] = useState({
-      student_id: '',
-      amount_due: '',
-      due_date: new Date().toISOString().split('T')[0]
-  });
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [iRes, sRes] = await Promise.all([
-        api.get('/fees/invoices'),
-        api.get('/students/')
-      ]);
-      setInvoices(iRes.data);
-      setStudents(sRes.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const handleSubmit = async () => {
-    await api.post('/fees/invoices', { 
-        student_id: formData.student_id, 
-        amount_due: parseInt(formData.amount_due), 
-        due_date: new Date(formData.due_date).toISOString(), 
-        status: 'UNPAID' 
-    });
-    setIsModalOpen(false);
-    setFormData({ student_id: '', amount_due: '', due_date: new Date().toISOString().split('T')[0] });
-    fetchData();
-  };
-
-  if (loading) return <div className="p-6"><LoadingSkeleton /></div>;
-
-  return (
-    <div className="p-6">
-      <PageHeader 
-        title="Fee Management" 
-        description="Manage student invoices and payments."
-        action={<Button onClick={() => setIsModalOpen(true)}>Create Invoice</Button>}
-      />
-
-      <div className="bg-white rounded-lg shadow-sm border mt-6">
-        <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-                <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount Due</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-                {invoices.map((i) => (
-                <tr key={i.id}>
-                    <td className="px-6 py-4 text-sm">{students.find(s => s.id === i.student_id)?.student_name || i.student_id}</td>
-                    <td className="px-6 py-4 text-sm">{i.amount_due}</td>
-                    <td className="px-6 py-4 text-sm">{new Date(i.due_date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 text-sm">{i.status}</td>
-                </tr>
-                ))}
-            </tbody>
-        </table>
-      </div>
-
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Create Invoice">
-        <div className="space-y-4">
-            <select value={formData.student_id} onChange={e => setFormData({...formData, student_id: e.target.value})} className="w-full border p-2 rounded">
-                <option value="">Select Student</option>
-                {students.map(s => <option key={s.id} value={s.id}>{s.student_name}</option>)}
-            </select>
-            <input type="number" value={formData.amount_due} onChange={e => setFormData({...formData, amount_due: e.target.value})} placeholder="Amount" className="w-full border p-2 rounded" />
-            <input type="date" value={formData.due_date} onChange={e => setFormData({...formData, due_date: e.target.value})} className="w-full border p-2 rounded" />
-            <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-                <Button onClick={handleSubmit}>Create</Button>
-            </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
+interface Student{id:string;student_name:string;admission_number?:string} interface Invoice{id:string;student_id:string;amount_due:number;due_date:string;status:string}
+const today=()=>new Date().toISOString().split('T')[0];
+export default function FeesPage(){const{can}=useAuth();const[invoices,setInvoices]=useState<Invoice[]>([]);const[students,setStudents]=useState<Student[]>([]);const[loading,setLoading]=useState(true);const[modal,setModal]=useState(false);const[search,setSearch]=useState('');const[error,setError]=useState('');const[saving,setSaving]=useState(false);const[form,setForm]=useState({student_id:'',amount_due:'',due_date:today()});const canCreate=can('fees.invoice.create');
+const fetchData=async()=>{setLoading(true);setError('');try{const[i,s]=await Promise.all([api.get('/fees/invoices'),api.get('/students/')]);setInvoices(i.data);setStudents(s.data);}catch(err){setError(apiErrorMessage(err,'Unable to load fee information.'));}finally{setLoading(false);}};useEffect(()=>{void fetchData();},[]);
+const studentMap=useMemo(()=>new Map(students.map(s=>[s.id,s])),[students]);const visible=useMemo(()=>{const q=search.trim().toLowerCase();return !q?invoices:invoices.filter(i=>{const s=studentMap.get(i.student_id);return s?.student_name.toLowerCase().includes(q)||s?.admission_number?.toLowerCase().includes(q)||i.status.toLowerCase().includes(q);});},[invoices,search,studentMap]);const total=invoices.reduce((n,i)=>n+Number(i.amount_due),0);const unpaid=invoices.filter(i=>!['paid','PAID'].includes(i.status)).reduce((n,i)=>n+Number(i.amount_due),0);
+const submit=async()=>{setError('');const amount=Number(form.amount_due);if(!form.student_id)return setError('Select a student.');if(!Number.isFinite(amount)||amount<=0)return setError('Invoice amount must be greater than zero.');if(!form.due_date)return setError('Select a due date.');setSaving(true);try{await api.post('/fees/invoices',{student_id:form.student_id,amount_due:amount,due_date:new Date(`${form.due_date}T00:00:00`).toISOString(),status:'UNPAID'});setModal(false);setForm({student_id:'',amount_due:'',due_date:today()});await fetchData();}catch(err){setError(apiErrorMessage(err,'Unable to create invoice.'));}finally{setSaving(false);}};
+if(loading)return <div className="p-6"><LoadingSkeleton/></div>;return <div className="space-y-6"><PageHeader title="Fee Management" description="Track student invoices, outstanding balances and collection status." action={canCreate?<Button onClick={()=>setModal(true)}><Plus size={17}/>Create Invoice</Button>:undefined}/>{error&&<div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}<div className="grid gap-4 sm:grid-cols-3"><Metric label="Invoices" value={String(invoices.length)} icon={<ReceiptText size={20}/>}/><Metric label="Total Invoiced" value={money(total)} icon={<IndianRupee size={20}/>}/><Metric label="Open Invoice Value" value={money(unpaid)} icon={<IndianRupee size={20}/>}/></div><div className="card p-4"><div className="relative max-w-md"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search student, admission number or status..."/></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Student</th><th>Amount Due</th><th>Due Date</th><th>Status</th></tr></thead><tbody>{visible.length===0?<tr><td colSpan={4}><div className="py-14 text-center"><ReceiptText size={32} className="mx-auto mb-3 text-slate-300"/><p className="font-medium text-slate-700">No invoices found</p><p className="mt-1 text-sm text-slate-500">{search?'Try changing your search.':'Create an invoice when fees become due.'}</p></div></td></tr>:visible.map(i=>{const s=studentMap.get(i.student_id);return <tr key={i.id}><td><div className="font-medium text-slate-900">{s?.student_name||'Unknown student'}</div><div className="text-xs text-slate-400">{s?.admission_number||''}</div></td><td className="font-medium">{money(Number(i.amount_due))}</td><td>{new Date(i.due_date).toLocaleDateString()}</td><td><Status status={i.status}/></td></tr>})}</tbody></table></div><Modal isOpen={modal} onClose={()=>!saving&&setModal(false)} title="Create Invoice"><div className="space-y-4"><Field label="Student"><select className="input" value={form.student_id} onChange={e=>setForm({...form,student_id:e.target.value})}><option value="">Select student</option>{students.map(s=><option key={s.id} value={s.id}>{s.student_name}{s.admission_number?` · ${s.admission_number}`:''}</option>)}</select></Field><Field label="Amount"><input type="number" min="0.01" step="0.01" className="input" value={form.amount_due} onChange={e=>setForm({...form,amount_due:e.target.value})} placeholder="0.00"/></Field><Field label="Due date"><input type="date" className="input" value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></Field><div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setModal(false)} disabled={saving}>Cancel</Button><Button onClick={submit} disabled={saving}>{saving?'Creating...':'Create Invoice'}</Button></div></div></Modal></div>}
+function Metric({label,value,icon}:{label:string;value:string;icon:React.ReactNode}){return <div className="card p-5"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold text-slate-900">{value}</p></div><div className="rounded-lg bg-slate-100 p-2.5 text-slate-600">{icon}</div></div></div>};function Field({label,children}:{label:string;children:React.ReactNode}){return <div><label className="label">{label}</label>{children}</div>};function money(v:number){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(v)};function Status({status}:{status:string}){const s=status.toLowerCase();return <span className={s==='paid'?'badge-success':s==='partially_paid'?'badge-warning':s==='cancelled'?'badge-danger':'badge-info'}>{status.replaceAll('_',' ')}</span>}
