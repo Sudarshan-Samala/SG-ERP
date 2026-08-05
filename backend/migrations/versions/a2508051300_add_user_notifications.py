@@ -1,7 +1,7 @@
 """add user notifications
 
 Revision ID: a2508051300
-Revises: 06533392cbfc
+Revises: c0011a003001
 Create Date: 2026-08-05 13:00:00
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "a2508051300"
-down_revision = "06533392cbfc"
+down_revision = "c0011a003001"
 branch_labels = None
 depends_on = None
 
