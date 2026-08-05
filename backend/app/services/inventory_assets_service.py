@@ -12,7 +12,7 @@ def _validate_quantity(data):
     if quantity is not None and quantity < 0: raise HTTPException(status_code=400, detail="Inventory quantity cannot be negative")
 
 def create_inventory_item(db, item_in, organization_id):
-    data=item_in.model_dump();_validate_quantity(data)
+    data=item_in.model_dump();_validate_quantity(data);data["name"]=data["name"].strip()
     duplicate=db.query(InventoryItem).filter(InventoryItem.organization_id==organization_id, InventoryItem.name==data["name"]).first()
     if duplicate: raise HTTPException(status_code=409, detail="Inventory item name already exists")
     item=InventoryItem(**data,organization_id=organization_id);db.add(item);db.commit();db.refresh(item);return item
@@ -22,6 +22,7 @@ def update_inventory_item(db,item_id,item_in,organization_id):
     if not item:return None
     data=item_in.model_dump(exclude_unset=True);_validate_quantity(data)
     if "name" in data:
+        data["name"]=data["name"].strip()
         duplicate=db.query(InventoryItem).filter(InventoryItem.organization_id==organization_id,InventoryItem.name==data["name"],InventoryItem.id!=item_id).first()
         if duplicate: raise HTTPException(status_code=409,detail="Inventory item name already exists")
     for field,value in data.items():setattr(item,field,value)
@@ -37,15 +38,21 @@ def get_assets(db,organization_id):return db.query(Asset).filter(Asset.organizat
 def get_asset(db,organization_id,asset_id):return db.query(Asset).filter(Asset.organization_id==organization_id,Asset.id==asset_id).first()
 
 def create_asset(db,asset_in,organization_id):
+    data=asset_in.model_dump();data["name"]=data["name"].strip();data["asset_tag"]=data["asset_tag"].strip().upper()
     try:
-        asset=Asset(**asset_in.model_dump(),organization_id=organization_id);db.add(asset);db.commit();db.refresh(asset);return asset
+        asset=Asset(**data,organization_id=organization_id);db.add(asset);db.commit();db.refresh(asset);return asset
     except IntegrityError as exc:db.rollback();raise HTTPException(status_code=409,detail="Asset tag already exists") from exc
 
 def update_asset(db,asset_id,asset_in,organization_id):
     asset=get_asset(db,organization_id,asset_id)
     if not asset:return None
-    if asset.status=="DISPOSED" and asset_in.status and asset_in.status!="DISPOSED":raise HTTPException(status_code=409,detail="Disposed assets cannot be reactivated")
-    for field,value in asset_in.model_dump(exclude_unset=True).items():setattr(asset,field,value)
+    data=asset_in.model_dump(exclude_unset=True)
+    requested=data.get("status")
+    allowed={"DEPLOYED":{"DEPLOYED","REPAIR","DISPOSED"},"REPAIR":{"REPAIR","DEPLOYED","DISPOSED"},"DISPOSED":{"DISPOSED"}}
+    if requested and requested not in allowed.get(asset.status,{asset.status}):raise HTTPException(status_code=409,detail=f"Invalid asset status transition from {asset.status} to {requested}")
+    if "name" in data:data["name"]=data["name"].strip()
+    if "asset_tag" in data:data["asset_tag"]=data["asset_tag"].strip().upper()
+    for field,value in data.items():setattr(asset,field,value)
     try:db.commit();db.refresh(asset)
     except IntegrityError as exc:db.rollback();raise HTTPException(status_code=409,detail="Asset tag already exists") from exc
     return asset
