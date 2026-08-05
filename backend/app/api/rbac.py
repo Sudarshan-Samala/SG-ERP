@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
 from app.core.database import get_db
 from app.api.deps import get_current_organization, require_permission
-from app.services.rbac_service import get_roles, create_role, get_permissions, assign_user_roles
+from app.services.rbac_service import get_roles, create_role, delete_role, get_permissions, assign_user_roles
 from app.schemas.rbac import Role, RoleCreate, Permission, UserRoleAssignment
 from app.models.base import Organization, User
 
@@ -21,6 +21,11 @@ def read_permissions(db: Session = Depends(get_db), _: User = Depends(require_pe
 @router.post("/", response_model=Role)
 def create_role_endpoint(role_in: RoleCreate, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("rbac.manage"))):
     return create_role(db, role_in, current_org.id)
+
+@router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_role_endpoint(role_id: UUID, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("rbac.manage"))):
+    delete_role(db, role_id, current_org.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.put("/users/{user_id}/roles", response_model=List[Role])
 def replace_user_roles(user_id: UUID, assignment: UserRoleAssignment, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("rbac.manage"))):

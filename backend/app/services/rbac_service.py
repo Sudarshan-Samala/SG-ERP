@@ -12,17 +12,31 @@ def get_roles(db: Session, organization_id: UUID):
 def create_role(db: Session, role_in: RoleCreate, organization_id: UUID):
     if role_in.organization_id is not None and role_in.organization_id != organization_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant role creation denied")
-    existing = db.query(Role).filter(Role.organization_id == organization_id, Role.name == role_in.name).first()
+    name = role_in.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role name must contain at least 2 characters")
+    existing = db.query(Role).filter(Role.organization_id == organization_id, Role.name.ilike(name)).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role already exists")
-    permissions = db.query(Permission).filter(Permission.name.in_(set(role_in.permission_names))).all() if role_in.permission_names else []
-    if len(permissions) != len(set(role_in.permission_names)):
+    permission_names = set(role_in.permission_names)
+    permissions = db.query(Permission).filter(Permission.name.in_(permission_names)).all() if permission_names else []
+    if len(permissions) != len(permission_names):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown permission")
-    role = Role(name=role_in.name, organization_id=organization_id, permissions=permissions)
+    role = Role(name=name, organization_id=organization_id, permissions=permissions)
     db.add(role)
     db.commit()
     db.refresh(role)
     return role
+
+
+def delete_role(db: Session, role_id: UUID, organization_id: UUID):
+    role = db.query(Role).filter(Role.id == role_id, Role.organization_id == organization_id).first()
+    if not role:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    if role.users:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remove this role from all users before deleting it")
+    db.delete(role)
+    db.commit()
 
 
 def assign_user_roles(db: Session, user_id: UUID, role_ids: list[UUID], organization_id: UUID):
