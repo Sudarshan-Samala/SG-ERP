@@ -1,5 +1,5 @@
 PERMISSIONS = {
-    "rbac.manage": "Manage tenant roles and user role assignments",
+    "rbac.manage": "Manage tenant roles and user role assignments", "users.manage": "Manage tenant users and branch assignments", "branches.read": "View organization branches", "branches.manage": "Create, update and remove organization branches",
     "students.read": "View student records", "students.create": "Create student records", "students.manage": "Update and remove student records",
     "admissions.read": "View admission enquiries", "admissions.manage": "Create and manage admission enquiries",
     "attendance.read": "View student attendance", "attendance.mark": "Mark student attendance",
