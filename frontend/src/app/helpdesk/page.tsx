@@ -1,52 +1,19 @@
 'use client';
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { Headphones, Plus, Search } from 'lucide-react';
+import api,{apiErrorMessage} from '@/lib/api';
+import {useAuth} from '@/lib/auth-context';
+import {PageHeader} from '@/components/ui/PageHeader';
+import {Button} from '@/components/ui/Button';
+import {Modal} from '@/components/ui/Modal';
 
-export default function HelpdeskPage() {
-  const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [subject, setSubject] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState('LOW');
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/helpdesk/'); // Need a GET endpoint for tickets
-      setTickets(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const createTicket = async () => {
-    await api.post('/helpdesk/', { subject, description, priority });
-    fetchData();
-  };
-
-  if (loading) return <div>Loading...</div>;
-
-  return (
-    <div className="p-4">
-      <h1 className="text-xl font-bold">IT Helpdesk</h1>
-      <div className="mt-4 grid grid-cols-1 gap-2">
-        <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" className="border p-2" />
-        <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Description" className="border p-2" />
-        <select value={priority} onChange={e => setPriority(e.target.value)} className="border p-2">
-            <option value="LOW">Low</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="HIGH">High</option>
-        </select>
-        <button onClick={createTicket} className="bg-green-500 text-white p-2">Create Ticket</button>
-      </div>
-      <ul className="mt-4">
-        {tickets.map((t: any) => <li key={t.id} className="border-b p-2">{t.subject} - {t.status}</li>)}
-      </ul>
-    </div>
-  );
-}
+interface Ticket{id:string;subject:string;description:string;priority:string;status:string;created_at?:string}
+const transitions:Record<string,string[]>={OPEN:['IN_PROGRESS','CLOSED'],IN_PROGRESS:['RESOLVED','CLOSED'],RESOLVED:['IN_PROGRESS','CLOSED'],CLOSED:[]};
+export default function HelpdeskPage(){const{can}=useAuth();const[tickets,setTickets]=useState<Ticket[]>([]);const[loading,setLoading]=useState(true);const[error,setError]=useState('');const[search,setSearch]=useState('');const[modal,setModal]=useState(false);const[saving,setSaving]=useState(false);const[form,setForm]=useState({subject:'',description:'',priority:'MEDIUM'});const canCreate=can('helpdesk.ticket.create'),canManage=can('helpdesk.manage');
+const load=async()=>{setLoading(true);setError('');try{setTickets((await api.get('/helpdesk/')).data)}catch(e){setError(apiErrorMessage(e,'Unable to load helpdesk tickets.'))}finally{setLoading(false)}};useEffect(()=>{void load()},[]);
+const visible=useMemo(()=>{const q=search.trim().toLowerCase();return q?tickets.filter(t=>t.subject.toLowerCase().includes(q)||t.description.toLowerCase().includes(q)):tickets},[tickets,search]);const count=(s:string)=>tickets.filter(t=>t.status===s).length;
+const create=async()=>{setError('');if(form.subject.trim().length<3||form.description.trim().length<5)return setError('Enter a clear subject and description.');setSaving(true);try{await api.post('/helpdesk/',{...form,subject:form.subject.trim(),description:form.description.trim()});setModal(false);setForm({subject:'',description:'',priority:'MEDIUM'});await load()}catch(e){setError(apiErrorMessage(e,'Unable to create ticket.'))}finally{setSaving(false)}};
+const change=async(id:string,status:string)=>{try{await api.patch(`/helpdesk/${id}/status/${status}`);await load()}catch(e){setError(apiErrorMessage(e,'Unable to update ticket status.'))}};
+return <div className="space-y-6"><PageHeader title="IT Helpdesk" description="Track support requests and resolve operational issues." action={canCreate?<Button onClick={()=>setModal(true)}><Plus size={17}/>New Ticket</Button>:undefined}/>{error&&<div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[['Open',count('OPEN')],['In Progress',count('IN_PROGRESS')],['Resolved',count('RESOLVED')],['Closed',count('CLOSED')]].map(([l,v])=><div key={l} className="card p-4"><div className="text-sm text-slate-500">{l}</div><div className="mt-1 text-2xl font-bold">{v}</div></div>)}</div><div className="card p-4"><div className="relative max-w-md"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search tickets..."/></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Subject</th><th>Priority</th><th>Status</th>{canManage&&<th>Workflow</th>}</tr></thead><tbody>{loading?<tr><td colSpan={canManage?4:3} className="py-12 text-center">Loading tickets...</td></tr>:visible.length===0?<tr><td colSpan={canManage?4:3}><div className="py-14 text-center text-slate-500"><Headphones size={32} className="mx-auto mb-3 text-slate-300"/><p className="font-medium">No tickets found</p><p className="mt-1 text-sm">Create a support request or adjust your search.</p></div></td></tr>:visible.map(t=><tr key={t.id}><td><div className="font-medium text-slate-900">{t.subject}</div><div className="mt-1 max-w-xl truncate text-xs text-slate-500">{t.description}</div></td><td><Badge value={t.priority}/></td><td><Badge value={t.status}/></td>{canManage&&<td><select className="input min-w-36" value="" disabled={!transitions[t.status]?.length} onChange={e=>e.target.value&&void change(t.id,e.target.value)}><option value="">Change status</option>{(transitions[t.status]||[]).map(s=><option key={s} value={s}>{s.replaceAll('_',' ')}</option>)}</select></td>}</tr>)}</tbody></table></div><Modal isOpen={modal} onClose={()=>!saving&&setModal(false)} title="Create Helpdesk Ticket"><div className="space-y-4"><Field label="Subject"><input className="input" value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}/></Field><Field label="Description"><textarea className="input min-h-28" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></Field><Field label="Priority"><select className="input" value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select></Field><div className="flex justify-end gap-2"><Button variant="secondary" onClick={()=>setModal(false)}>Cancel</Button><Button onClick={create} disabled={saving}>{saving?'Creating...':'Create Ticket'}</Button></div></div></Modal></div>}
+function Field({label,children}:{label:string;children:React.ReactNode}){return <div><label className="label">{label}</label>{children}</div>}
+function Badge({value}:{value:string}){const v=value.toUpperCase();const c=v==='HIGH'||v==='CLOSED'?'badge-danger':v==='RESOLVED'?'badge-success':v==='IN_PROGRESS'||v==='MEDIUM'?'badge-warning':'badge-info';return <span className={c}>{value.replaceAll('_',' ')}</span>}
