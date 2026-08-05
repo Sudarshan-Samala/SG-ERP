@@ -1,121 +1,23 @@
 'use client';
-import { useState, useEffect } from 'react';
-import api from '@/lib/api';
+import { useMemo, useState, useEffect } from 'react';
+import { Package, Search, Wrench, Archive, Boxes } from 'lucide-react';
+import api, { apiErrorMessage } from '@/lib/api';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 
-interface InventoryItem {
-    id: string;
-    name: string;
-    quantity: number;
+interface InventoryItem { id:string; name:string; quantity:number }
+interface Asset { id:string; name:string; asset_tag:string; status:'DEPLOYED'|'REPAIR'|'DISPOSED'|string }
+export default function InventoryAssetsPage(){
+ const [activeTab,setActiveTab]=useState<'inventory'|'assets'>('inventory');const[inventory,setInventory]=useState<InventoryItem[]>([]);const[assets,setAssets]=useState<Asset[]>([]);const[loading,setLoading]=useState(true);const[error,setError]=useState('');const[search,setSearch]=useState('');
+ const fetchData=async()=>{setLoading(true);setError('');try{const[invRes,astRes]=await Promise.all([api.get('/inventory-assets/inventory'),api.get('/inventory-assets/assets')]);setInventory(invRes.data);setAssets(astRes.data);}catch(e){setError(apiErrorMessage(e,'Unable to load inventory and assets.'));}finally{setLoading(false);}};useEffect(()=>{void fetchData();},[]);
+ const q=search.trim().toLowerCase();const visibleInventory=useMemo(()=>!q?inventory:inventory.filter(i=>i.name.toLowerCase().includes(q)),[inventory,q]);const visibleAssets=useMemo(()=>!q?assets:assets.filter(a=>`${a.name} ${a.asset_tag} ${a.status}`.toLowerCase().includes(q)),[assets,q]);const totalQty=inventory.reduce((s,i)=>s+i.quantity,0);const lowStock=inventory.filter(i=>i.quantity<=5).length;const repair=assets.filter(a=>a.status==='REPAIR').length;const disposed=assets.filter(a=>a.status==='DISPOSED').length;
+ if(loading)return <div className="p-6"><LoadingSkeleton/></div>;
+ return <div className="space-y-6"><PageHeader title="Inventory & Assets" description="Monitor stock availability and the lifecycle of institutional assets."/>{error&&<div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button className="font-semibold" onClick={()=>void fetchData()}>Retry</button></div>}
+ <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Stock Quantity" value={totalQty} icon={<Boxes size={20}/>}/><Stat label="Low Stock Items" value={lowStock} icon={<Package size={20}/>}/><Stat label="Assets in Repair" value={repair} icon={<Wrench size={20}/>}/><Stat label="Disposed Assets" value={disposed} icon={<Archive size={20}/>}/></div>
+ <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div className="flex gap-2"><Button variant={activeTab==='inventory'?'primary':'secondary'} onClick={()=>setActiveTab('inventory')}>Inventory</Button><Button variant={activeTab==='assets'?'primary':'secondary'} onClick={()=>setActiveTab('assets')}>Assets</Button></div><div className="relative sm:w-80"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder={activeTab==='inventory'?'Search inventory...':'Search asset or tag...'}/></div></div>
+ <div className="table-wrap">{activeTab==='inventory'?<table className="data-table"><thead><tr><th>Item</th><th>Quantity</th><th>Stock Status</th></tr></thead><tbody>{visibleInventory.length===0?<Empty columns={3}/>:visibleInventory.map(i=><tr key={i.id}><td className="font-medium text-slate-900">{i.name}</td><td>{i.quantity}</td><td>{i.quantity<=0?<span className="badge-danger">Out of stock</span>:i.quantity<=5?<span className="badge-warning">Low stock</span>:<span className="badge-success">Available</span>}</td></tr>)}</tbody></table>:<table className="data-table"><thead><tr><th>Asset</th><th>Asset Tag</th><th>Status</th></tr></thead><tbody>{visibleAssets.length===0?<Empty columns={3}/>:visibleAssets.map(a=><tr key={a.id}><td className="font-medium text-slate-900">{a.name}</td><td>{a.asset_tag}</td><td><AssetStatus status={a.status}/></td></tr>)}</tbody></table>}</div></div>;
 }
-
-interface Asset {
-    id: string;
-    name: string;
-    asset_tag: string;
-    status: 'DEPLOYED' | 'REPAIR' | 'DISPOSED';
-}
-
-export default function InventoryAssetsPage() {
-    const [activeTab, setActiveTab] = useState<'inventory' | 'assets'>('inventory');
-    const [inventory, setInventory] = useState<InventoryItem[]>([]);
-    const [assets, setAssets] = useState<Asset[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    const fetchData = async () => {
-        setLoading(true);
-        try {
-            const [invRes, astRes] = await Promise.all([
-                api.get('/inventory-assets/inventory'),
-                api.get('/inventory-assets/assets')
-            ]);
-            setInventory(invRes.data);
-            setAssets(astRes.data);
-        } catch (err) {
-            console.error("Failed to fetch data", err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => { fetchData(); }, []);
-
-    const totalInventoryQuantity = inventory.reduce((sum, item) => sum + item.quantity, 0);
-    const assetStats = {
-        total: assets.length,
-        deployed: assets.filter(a => a.status === 'DEPLOYED').length,
-        repair: assets.filter(a => a.status === 'REPAIR').length,
-        disposed: assets.filter(a => a.status === 'DISPOSED').length,
-    };
-
-    if (loading) return <div className="p-6"><LoadingSkeleton /></div>;
-
-    return (
-        <div className="p-6">
-            <PageHeader title="Inventory & Assets" description="Manage school resources." />
-            
-            <div className="flex gap-4 mt-6">
-                <Button variant={activeTab === 'inventory' ? 'primary' : 'secondary'} onClick={() => setActiveTab('inventory')}>Inventory</Button>
-                <Button variant={activeTab === 'assets' ? 'primary' : 'secondary'} onClick={() => setActiveTab('assets')}>Assets</Button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
-                {activeTab === 'inventory' ? (
-                    <>
-                        <div className="card p-4"><h3>Items</h3><p className="text-2xl">{inventory.length}</p></div>
-                        <div className="card p-4"><h3>Total Qty</h3><p className="text-2xl">{totalInventoryQuantity}</p></div>
-                    </>
-                ) : (
-                    <>
-                        <div className="card p-4"><h3>Total Assets</h3><p className="text-2xl">{assetStats.total}</p></div>
-                        <div className="card p-4 text-green-600"><h3>Deployed</h3><p className="text-2xl">{assetStats.deployed}</p></div>
-                        <div className="card p-4 text-yellow-600"><h3>Repair</h3><p className="text-2xl">{assetStats.repair}</p></div>
-                        <div className="card p-4 text-red-600"><h3>Disposed</h3><p className="text-2xl">{assetStats.disposed}</p></div>
-                    </>
-                )}
-            </div>
-
-            <div className="mt-6 bg-white p-6 rounded-lg border">
-                {activeTab === 'inventory' ? (
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                            {inventory.map(item => (
-                                <tr key={item.id}>
-                                    <td className="px-6 py-4">{item.name}</td>
-                                    <td className="px-6 py-4">{item.quantity}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                ) : (
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                            {assets.map(asset => (
-                                <tr key={asset.id}>
-                                    <td className="px-6 py-4">{asset.name}</td>
-                                    <td className="px-6 py-4">{asset.asset_tag}</td>
-                                    <td className="px-6 py-4"><span className="px-2 py-1 rounded text-xs bg-gray-100">{asset.status}</span></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                )}
-            </div>
-        </div>
-    );
-}
+function Empty({columns}:{columns:number}){return <tr><td colSpan={columns} className="py-12 text-center text-slate-500">No matching records found.</td></tr>}
+function Stat({label,value,icon}:{label:string;value:number;icon:React.ReactNode}){return <div className="card flex items-center justify-between p-5"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div><div className="rounded-lg bg-slate-100 p-3 text-slate-600">{icon}</div></div>}
+function AssetStatus({status}:{status:string}){if(status==='DEPLOYED')return <span className="badge-success">Deployed</span>;if(status==='REPAIR')return <span className="badge-warning">Repair</span>;if(status==='DISPOSED')return <span className="badge-danger">Disposed</span>;return <span className="badge-info">{status}</span>}

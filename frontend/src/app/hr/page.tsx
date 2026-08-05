@@ -1,58 +1,25 @@
 'use client';
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { BriefcaseBusiness, Plus, Search, Users } from 'lucide-react';
+import api, { apiErrorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
 
-export default function HRPage() {
-  const [employees, setEmployees] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [user_id, setUserId] = useState('');
-  const [employee_id, setEmployeeId] = useState('');
-  const [department, setDepartment] = useState('');
-  const [designation, setDesignation] = useState('');
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [eRes, uRes] = await Promise.all([
-        api.get('/hr/employees'),
-        api.get('/users/')
-      ]);
-      setEmployees(eRes.data);
-      setUsers(uRes.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const createEmployee = async () => {
-    await api.post('/hr/employees', { user_id, employee_id, department, designation });
-    fetchData();
-  };
-
-  if (loading) return <div>Loading...</div>;
-
-  return (
-    <div className="p-4">
-      <h1 className="text-xl font-bold">HR Management</h1>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <select value={user_id} onChange={e => setUserId(e.target.value)} className="border p-2 col-span-2">
-            <option value="">Select User</option>
-            {users.map((u: any) => <option key={u.id} value={u.id}>{u.email}</option>)}
-        </select>
-        <input value={employee_id} onChange={e => setEmployeeId(e.target.value)} placeholder="Employee ID" className="border p-2" />
-        <input value={department} onChange={e => setDepartment(e.target.value)} placeholder="Department" className="border p-2" />
-        <input value={designation} onChange={e => setDesignation(e.target.value)} placeholder="Designation" className="border p-2 col-span-2" />
-        <button onClick={createEmployee} className="bg-green-500 text-white p-2 col-span-2">Create Employee</button>
-      </div>
-      <ul className="mt-4">
-        {employees.map((e: any) => <li key={e.id} className="border-b p-2">{e.employee_id} - {e.designation} ({e.department})</li>)}
-      </ul>
-    </div>
-  );
+interface Employee { id:string; user_id:string; employee_id:string; department:string; designation:string }
+interface User { id:string; email:string; full_name?:string|null }
+export default function HRPage(){
+ const {can}=useAuth(); const [employees,setEmployees]=useState<Employee[]>([]); const [users,setUsers]=useState<User[]>([]); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [error,setError]=useState(''); const [success,setSuccess]=useState(''); const [search,setSearch]=useState('');
+ const [form,setForm]=useState({user_id:'',employee_id:'',department:'',designation:''}); const canCreate=can('hr.employee.create');
+ const load=async()=>{setLoading(true);setError('');try{const requests:[Promise<any>,Promise<any>|null]=[api.get('/hr/employees'),canCreate?api.get('/users/'):null];const employeeRes=await requests[0];setEmployees(employeeRes.data);if(requests[1])setUsers((await requests[1]).data);}catch(e){setError(apiErrorMessage(e,'Unable to load HR information.'));}finally{setLoading(false);}};
+ useEffect(()=>{void load();},[canCreate]);
+ const visible=useMemo(()=>{const q=search.trim().toLowerCase();return !q?employees:employees.filter(e=>`${e.employee_id} ${e.department} ${e.designation}`.toLowerCase().includes(q));},[employees,search]);
+ const departments=new Set(employees.map(e=>e.department).filter(Boolean)).size;
+ const createEmployee=async()=>{setError('');setSuccess('');if(!form.user_id||!form.employee_id.trim()||!form.department.trim()||!form.designation.trim())return setError('User, employee ID, department and designation are required.');setSaving(true);try{await api.post('/hr/employees',{...form,employee_id:form.employee_id.trim(),department:form.department.trim(),designation:form.designation.trim()});setForm({user_id:'',employee_id:'',department:'',designation:''});setSuccess('Employee created successfully.');await load();}catch(e){setError(apiErrorMessage(e,'Unable to create employee.'));}finally{setSaving(false);}};
+ return <div className="space-y-6"><PageHeader title="HR & Payroll" description="Manage employees, departments and workforce records from one secure workspace."/>
+ <div className="grid gap-4 sm:grid-cols-3"><Stat label="Employees" value={employees.length} icon={<Users size={20}/>}/><Stat label="Departments" value={departments} icon={<BriefcaseBusiness size={20}/>}/><Stat label="Visible Records" value={visible.length} icon={<Search size={20}/>}/></div>
+ {error&&<div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}{success&&<div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</div>}
+ {canCreate&&<div className="card p-5"><h2 className="font-semibold text-slate-900">Add Employee</h2><p className="mb-4 text-sm text-slate-500">Link an existing ERP user to an employee record.</p><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><select className="input" value={form.user_id} onChange={e=>setForm({...form,user_id:e.target.value})}><option value="">Select user</option>{users.map(u=><option key={u.id} value={u.id}>{u.full_name||u.email}</option>)}</select><input className="input" value={form.employee_id} onChange={e=>setForm({...form,employee_id:e.target.value})} placeholder="Employee ID"/><input className="input" value={form.department} onChange={e=>setForm({...form,department:e.target.value})} placeholder="Department"/><input className="input" value={form.designation} onChange={e=>setForm({...form,designation:e.target.value})} placeholder="Designation"/></div><div className="mt-4 flex justify-end"><Button onClick={createEmployee} disabled={saving}><Plus size={17}/>{saving?'Creating...':'Create Employee'}</Button></div></div>}
+ <div><div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="font-semibold">Employee Directory</h2><p className="text-sm text-slate-500">Search by ID, department or designation.</p></div><div className="relative sm:w-80"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search employees..."/></div></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Employee ID</th><th>Department</th><th>Designation</th></tr></thead><tbody>{loading?<tr><td colSpan={3} className="py-10 text-center">Loading employees...</td></tr>:visible.length===0?<tr><td colSpan={3} className="py-12 text-center text-slate-500">No employee records found.</td></tr>:visible.map(e=><tr key={e.id}><td className="font-medium text-slate-900">{e.employee_id}</td><td>{e.department}</td><td>{e.designation}</td></tr>)}</tbody></table></div></div></div>;
 }
+function Stat({label,value,icon}:{label:string;value:number;icon:React.ReactNode}){return <div className="card flex items-center justify-between p-5"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div><div className="rounded-lg bg-slate-100 p-3 text-slate-600">{icon}</div></div>}
