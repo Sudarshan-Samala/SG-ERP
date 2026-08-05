@@ -8,7 +8,8 @@ PERMISSIONS = {
     "exam.read": "View examinations and schedules", "exam.manage": "Manage examinations and exam types", "exam.schedule.manage": "Manage examination schedules", "exam.result.read": "View examination results", "exam.result.create": "Create examination results",
     "inventory.read": "View inventory", "inventory.manage": "Manage inventory", "assets.read": "View assets", "assets.manage": "Manage assets",
     "transport.read": "View transport vehicles, routes and drivers", "transport.manage": "Manage transport vehicles, routes and drivers",
-    "helpdesk.read": "View helpdesk tickets", "helpdesk.ticket.create": "Create helpdesk tickets",
+    "helpdesk.read": "View helpdesk tickets", "helpdesk.ticket.create": "Create helpdesk tickets", "helpdesk.manage": "Manage helpdesk ticket workflow",
+    "communication.read": "View organization communications", "communication.create": "Create communication drafts", "communication.manage": "Manage communication delivery workflow",
 }
 
 ROLE_PERMISSION_SETS = {
@@ -22,4 +23,6 @@ ROLE_PERMISSION_SETS = {
     "Asset Manager": {"inventory.read", "inventory.manage", "assets.read", "assets.manage"},
     "Transport Manager": {"transport.read", "transport.manage"},
     "Helpdesk User": {"helpdesk.read", "helpdesk.ticket.create"},
+    "Helpdesk Manager": {"helpdesk.read", "helpdesk.ticket.create", "helpdesk.manage"},
+    "Communication Manager": {"communication.read", "communication.create", "communication.manage"},
 }
