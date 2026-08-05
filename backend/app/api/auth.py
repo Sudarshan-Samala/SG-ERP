@@ -140,4 +140,18 @@ def logout_all(request: Request, response: Response, db: Session = Depends(get_d
 
 @router.get("/me")
 def me(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "email": current_user.email, "full_name": current_user.full_name, "organization_id": current_user.organization_id, "is_active": current_user.is_active, "is_superuser": current_user.is_superuser}
+    permissions = sorted({permission.name for role in current_user.roles for permission in role.permissions})
+    branches = sorted(
+        ({"id": branch.id, "name": branch.name, "code": branch.code} for branch in current_user.branches if branch.organization_id == current_user.organization_id),
+        key=lambda branch: branch["name"].lower(),
+    )
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "organization_id": current_user.organization_id,
+        "is_active": current_user.is_active,
+        "is_superuser": current_user.is_superuser,
+        "permissions": permissions,
+        "branches": branches,
+    }
