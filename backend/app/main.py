@@ -25,18 +25,16 @@ from app.api.circular import router as circular_router
 from app.api.document import router as doc_router
 from app.api.dashboard import router as dashboard_router
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    openapi_url="/api/v1/openapi.json"
-)
+app = FastAPI(title=settings.PROJECT_NAME, openapi_url="/api/v1/openapi.json")
 
-# Set up CORS
+# Credentialed requests must never use wildcard origins. Production should set
+# TRUSTED_ORIGINS to the exact Vercel/custom frontend origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=settings.TRUSTED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
