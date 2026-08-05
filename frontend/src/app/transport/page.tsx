@@ -1,46 +1,28 @@
 'use client';
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { Bus, MapPinned, Plus, Search, UserRound } from 'lucide-react';
+import api, { apiErrorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
 
-export default function TransportPage() {
-  const [vehicles, setVehicles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [number, setNumber] = useState('');
-  const [capacity, setCapacity] = useState('');
+interface Vehicle { id:string; number:string; capacity:number }
+interface Route { id:string; name:string; vehicle_id?:string|null }
+interface Driver { id:string; name:string; license_number:string }
+type Tab='vehicles'|'routes'|'drivers';
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/transport/vehicles');
-      setVehicles(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const createVehicle = async () => {
-    await api.post('/transport/vehicles', { number, capacity: parseInt(capacity) });
-    fetchData();
-  };
-
-  if (loading) return <div>Loading...</div>;
-
-  return (
-    <div className="p-4">
-      <h1 className="text-xl font-bold">Transport Management</h1>
-      <div className="mt-4 flex gap-2">
-        <input value={number} onChange={e => setNumber(e.target.value)} placeholder="Vehicle Number" className="border p-2" />
-        <input type="number" value={capacity} onChange={e => setCapacity(e.target.value)} placeholder="Capacity" className="border p-2" />
-        <button onClick={createVehicle} className="bg-green-500 text-white p-2">Create Vehicle</button>
-      </div>
-      <ul className="mt-4">
-        {vehicles.map((v: any) => <li key={v.id} className="border-b p-2">{v.number} - Capacity: {v.capacity}</li>)}
-      </ul>
-    </div>
-  );
+export default function TransportPage(){
+ const {can}=useAuth(); const canManage=can('transport.manage'); const [vehicles,setVehicles]=useState<Vehicle[]>([]); const [routes,setRoutes]=useState<Route[]>([]); const [drivers,setDrivers]=useState<Driver[]>([]); const [tab,setTab]=useState<Tab>('vehicles'); const [search,setSearch]=useState(''); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [error,setError]=useState(''); const [success,setSuccess]=useState(''); const [vehicleForm,setVehicleForm]=useState({number:'',capacity:''}); const [routeForm,setRouteForm]=useState({name:'',vehicle_id:''}); const [driverForm,setDriverForm]=useState({name:'',license_number:''});
+ const load=async()=>{setLoading(true);setError('');try{const[v,r,d]=await Promise.all([api.get('/transport/vehicles'),api.get('/transport/routes'),api.get('/transport/drivers')]);setVehicles(v.data);setRoutes(r.data);setDrivers(d.data);}catch(e){setError(apiErrorMessage(e,'Unable to load transport operations.'));}finally{setLoading(false);}}; useEffect(()=>{void load();},[]);
+ const q=search.trim().toLowerCase(); const visibleVehicles=useMemo(()=>vehicles.filter(v=>!q||`${v.number} ${v.capacity}`.toLowerCase().includes(q)),[vehicles,q]); const visibleRoutes=useMemo(()=>routes.filter(r=>!q||r.name.toLowerCase().includes(q)),[routes,q]); const visibleDrivers=useMemo(()=>drivers.filter(d=>!q||`${d.name} ${d.license_number}`.toLowerCase().includes(q)),[drivers,q]); const assigned=new Set(routes.map(r=>r.vehicle_id).filter(Boolean));
+ const create=async()=>{setError('');setSuccess('');setSaving(true);try{if(tab==='vehicles'){const capacity=Number(vehicleForm.capacity);if(!vehicleForm.number.trim()||!Number.isInteger(capacity)||capacity<=0)return setError('Enter a valid vehicle number and positive capacity.');await api.post('/transport/vehicles',{number:vehicleForm.number.trim().toUpperCase(),capacity});setVehicleForm({number:'',capacity:''});}else if(tab==='routes'){if(!routeForm.name.trim())return setError('Route name is required.');await api.post('/transport/routes',{name:routeForm.name.trim(),vehicle_id:routeForm.vehicle_id||null});setRouteForm({name:'',vehicle_id:''});}else{if(!driverForm.name.trim()||!driverForm.license_number.trim())return setError('Driver name and licence number are required.');await api.post('/transport/drivers',{name:driverForm.name.trim(),license_number:driverForm.license_number.trim().toUpperCase()});setDriverForm({name:'',license_number:''});}setSuccess('Transport record created successfully.');await load();}catch(e){setError(apiErrorMessage(e,'Unable to create transport record.'));}finally{setSaving(false);}};
+ if(loading)return <div className="p-6"><LoadingSkeleton/></div>;
+ return <div className="space-y-6"><PageHeader title="Transport" description="Manage vehicles, routes and drivers from one operational workspace."/>{error&&<Alert tone="error">{error}</Alert>}{success&&<Alert tone="success">{success}</Alert>}<div className="grid gap-4 sm:grid-cols-3"><Stat label="Vehicles" value={vehicles.length} icon={<Bus size={20}/>}/><Stat label="Routes" value={routes.length} icon={<MapPinned size={20}/>}/><Stat label="Drivers" value={drivers.length} icon={<UserRound size={20}/>}/></div>
+ <div className="card p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-wrap gap-2">{(['vehicles','routes','drivers'] as Tab[]).map(t=><Button key={t} variant={tab===t?'primary':'secondary'} onClick={()=>{setTab(t);setError('');setSuccess('');}}>{t[0].toUpperCase()+t.slice(1)}</Button>)}</div><div className="relative w-full lg:w-80"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="input pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder={`Search ${tab}...`}/></div></div>
+ {canManage&&<div className="mt-5 border-t border-slate-200 pt-5"><div className="grid gap-3 md:grid-cols-3">{tab==='vehicles'?<><input className="input" placeholder="Vehicle number" value={vehicleForm.number} onChange={e=>setVehicleForm({...vehicleForm,number:e.target.value})}/><input className="input" type="number" min="1" max="200" placeholder="Capacity" value={vehicleForm.capacity} onChange={e=>setVehicleForm({...vehicleForm,capacity:e.target.value})}/></>:tab==='routes'?<><input className="input" placeholder="Route name" value={routeForm.name} onChange={e=>setRouteForm({...routeForm,name:e.target.value})}/><select className="input" value={routeForm.vehicle_id} onChange={e=>setRouteForm({...routeForm,vehicle_id:e.target.value})}><option value="">No vehicle assigned</option>{vehicles.filter(v=>!assigned.has(v.id)).map(v=><option key={v.id} value={v.id}>{v.number}</option>)}</select></>:<><input className="input" placeholder="Driver name" value={driverForm.name} onChange={e=>setDriverForm({...driverForm,name:e.target.value})}/><input className="input" placeholder="Licence number" value={driverForm.license_number} onChange={e=>setDriverForm({...driverForm,license_number:e.target.value})}/></>}<Button onClick={create} disabled={saving}><Plus size={17}/>{saving?'Saving...':`Add ${tab.slice(0,-1)}`}</Button></div></div>}</div>
+ <div className="table-wrap">{tab==='vehicles'?<Table headers={['Vehicle Number','Capacity','Assignment']} rows={visibleVehicles.map(v=>[v.number,String(v.capacity),assigned.has(v.id)?'Assigned':'Available'])}/>:tab==='routes'?<Table headers={['Route','Vehicle']} rows={visibleRoutes.map(r=>[r.name,vehicles.find(v=>v.id===r.vehicle_id)?.number||'Unassigned'])}/>:<Table headers={['Driver','Licence Number']} rows={visibleDrivers.map(d=>[d.name,d.license_number])}/>}</div></div>;
 }
+function Table({headers,rows}:{headers:string[];rows:string[][]}){return <table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{rows.length===0?<tr><td colSpan={headers.length} className="py-12 text-center text-slate-500">No matching records found.</td></tr>:rows.map((r,i)=><tr key={i}>{r.map((c,j)=><td key={j} className={j===0?'font-medium text-slate-900':''}>{c}</td>)}</tr>)}</tbody></table>}
+function Stat({label,value,icon}:{label:string;value:number;icon:React.ReactNode}){return <div className="card flex items-center justify-between p-5"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div><div className="rounded-lg bg-slate-100 p-3 text-slate-600">{icon}</div></div>}
+function Alert({tone,children}:{tone:'error'|'success';children:React.ReactNode}){return <div className={`rounded-md border px-4 py-3 text-sm ${tone==='error'?'border-red-200 bg-red-50 text-red-700':'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{children}</div>}
