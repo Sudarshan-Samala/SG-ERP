@@ -12,6 +12,11 @@ from uuid import UUID
 router = APIRouter()
 class StockAdjustment(BaseModel): delta: int = Field(ge=-1000000, le=1000000)
 
+@router.get("/summary")
+def inventory_summary(db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("inventory.read"))):
+    items=get_inventory_items(db,current_org.id); assets=get_assets(db,current_org.id)
+    return {"inventory_items":len(items),"stock_quantity":sum(i.quantity for i in items),"low_stock_items":sum(i.quantity<=5 for i in items),"out_of_stock_items":sum(i.quantity==0 for i in items),"assets":len(assets),"assets_in_repair":sum(a.status=="REPAIR" for a in assets),"disposed_assets":sum(a.status=="DISPOSED" for a in assets)}
+
 @router.get("/inventory", response_model=List[InventoryItem])
 def read_inventory(db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("inventory.read"))): return get_inventory_items(db, current_org.id)
 @router.post("/inventory", response_model=InventoryItem)
