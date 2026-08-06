@@ -19,13 +19,14 @@ from app.services.rate_limit import SlidingWindowRateLimiter
 from app.services.session_service import InvalidSession,RefreshReplayDetected,create_session,list_active_sessions,revoke_all_sessions,revoke_session,rotate_refresh_token
 from app.services.user_service import get_user_by_email
 router=APIRouter();login_limiter=SlidingWindowRateLimiter(settings.AUTH_LOGIN_RATE_LIMIT,settings.AUTH_RATE_LIMIT_WINDOW_SECONDS);refresh_limiter=SlidingWindowRateLimiter(settings.AUTH_REFRESH_RATE_LIMIT,settings.AUTH_RATE_LIMIT_WINDOW_SECONDS);signup_limiter=SlidingWindowRateLimiter(settings.AUTH_SIGNUP_RATE_LIMIT,settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
-class SessionToken(Token): session_id:UUID
-class RefreshRequest(BaseModel): session_id:UUID;organization_id:UUID
-class LogoutRequest(BaseModel): session_id:UUID
-class SessionView(BaseModel): id:UUID;created_at:datetime;last_used_at:datetime|None;expires_at:datetime
-class SignupRequest(BaseModel): organization_name:str=Field(min_length=2,max_length=120);full_name:str=Field(min_length=2,max_length=120);email:EmailStr;password:str=Field(min_length=12,max_length=128)
+class SessionToken(Token):session_id:UUID
+class RefreshRequest(BaseModel):session_id:UUID;organization_id:UUID
+class LogoutRequest(BaseModel):session_id:UUID
+class SessionView(BaseModel):id:UUID;created_at:datetime;last_used_at:datetime|None;expires_at:datetime
+class SignupRequest(BaseModel):organization_name:str=Field(min_length=2,max_length=120);full_name:str=Field(min_length=2,max_length=120);email:EmailStr;password:str=Field(min_length=12,max_length=128)
 def _client_metadata(r:Request):return(r.client.host if r.client else None,r.headers.get('user-agent'))
 def _rate_key(r:Request,s:str):ip,_=_client_metadata(r);return f'{s}:{ip or "unknown"}'
+def _login_key(r:Request,email:str):ip,_=_client_metadata(r);return f'login:{ip or "unknown"}:{email.strip().lower()[:160]}'
 def _set_refresh_cookie(r:Response,t:str):r.set_cookie(key=settings.REFRESH_COOKIE_NAME,value=t,max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS*86400,httponly=True,secure=settings.REFRESH_COOKIE_SECURE,samesite=settings.REFRESH_COOKIE_SAMESITE,path='/api/v1/auth')
 def _clear_refresh_cookie(r:Response):r.delete_cookie(key=settings.REFRESH_COOKIE_NAME,path='/api/v1/auth',secure=settings.REFRESH_COOKIE_SECURE,httponly=True,samesite=settings.REFRESH_COOKIE_SAMESITE)
 def _password_is_strong(p:str):return bool(re.search(r'[a-z]',p)and re.search(r'[A-Z]',p)and re.search(r'\d',p)and re.search(r'[^A-Za-z0-9]',p))
@@ -35,15 +36,15 @@ def signup(payload:SignupRequest,request:Request,response:Response,db:Session=De
  if not _password_is_strong(payload.password):raise HTTPException(status_code=400,detail='Password must include uppercase, lowercase, number and special character')
  if get_user_by_email(db,email):raise HTTPException(status_code=409,detail='An account with this email already exists')
  if db.query(Organization).filter(func.lower(Organization.name)==org_name.lower()).first():raise HTTPException(status_code=409,detail='An organization with this name already exists')
- try:
-  organization=Organization(name=org_name,is_active=True);db.add(organization);db.flush();role=Role(name='Organization Administrator',organization_id=organization.id,permissions=db.query(Permission).all());db.add(role);db.flush();user=User(email=email,hashed_password=get_password_hash(payload.password),full_name=full_name,organization_id=organization.id,is_active=True,is_superuser=False,roles=[role]);db.add(user);db.commit();db.refresh(user)
+ try:organization=Organization(name=org_name,is_active=True);db.add(organization);db.flush();role=Role(name='Organization Administrator',organization_id=organization.id,permissions=db.query(Permission).all());db.add(role);db.flush();user=User(email=email,hashed_password=get_password_hash(payload.password),full_name=full_name,organization_id=organization.id,is_active=True,is_superuser=False,roles=[role]);db.add(user);db.commit();db.refresh(user)
  except IntegrityError:db.rollback();raise HTTPException(status_code=409,detail='Account or organization already exists')
  issued=create_session(db,user_id=user.id,organization_id=user.organization_id);token=create_access_token(subject=user.id,organization_id=user.organization_id,session_id=issued.session.id);_set_refresh_cookie(response,issued.refresh_token);set_csrf_cookie(response,generate_csrf_token());record_auth_event(db,event_type='signup',outcome='success',organization_id=user.organization_id,user_id=user.id,session_id=issued.session.id,email=user.email,ip_address=ip,user_agent=ua);return {'access_token':token,'session_id':issued.session.id,'token_type':'bearer'}
 @router.post('/login',response_model=SessionToken)
 def login(request:Request,response:Response,db:Session=Depends(get_db),form_data:OAuth2PasswordRequestForm=Depends()):
- login_limiter.check(_rate_key(request,'login'));ip,ua=_client_metadata(request);user=get_user_by_email(db,email=form_data.username)
- if not user or not verify_password(form_data.password,user.hashed_password):record_auth_event(db,event_type='login',outcome='failure',email=form_data.username,ip_address=ip,user_agent=ua);raise HTTPException(status_code=401,detail='Incorrect email or password')
- if not user.is_active:raise HTTPException(status_code=403,detail='Inactive user')
+ email=form_data.username.strip().lower();login_limiter.check(_login_key(request,email));ip,ua=_client_metadata(request);user=get_user_by_email(db,email=email)
+ if not user or not verify_password(form_data.password,user.hashed_password):record_auth_event(db,event_type='login',outcome='failure',email=email,ip_address=ip,user_agent=ua);raise HTTPException(status_code=401,detail='Incorrect email or password')
+ if not user.is_active:record_auth_event(db,event_type='login',outcome='failure',organization_id=user.organization_id,user_id=user.id,email=user.email,ip_address=ip,user_agent=ua);raise HTTPException(status_code=403,detail='Inactive user')
+ if not user.organization or not user.organization.is_active:record_auth_event(db,event_type='login',outcome='failure',organization_id=user.organization_id,user_id=user.id,email=user.email,ip_address=ip,user_agent=ua);raise HTTPException(status_code=403,detail='Organization is inactive')
  issued=create_session(db,user_id=user.id,organization_id=user.organization_id);token=create_access_token(subject=user.id,organization_id=user.organization_id,session_id=issued.session.id);_set_refresh_cookie(response,issued.refresh_token);set_csrf_cookie(response,generate_csrf_token());record_auth_event(db,event_type='login',outcome='success',organization_id=user.organization_id,user_id=user.id,session_id=issued.session.id,email=user.email,ip_address=ip,user_agent=ua);return {'access_token':token,'session_id':issued.session.id,'token_type':'bearer'}
 @router.post('/refresh',response_model=SessionToken)
 def refresh(request_body:RefreshRequest,request:Request,response:Response,db:Session=Depends(get_db),refresh_token:str|None=Cookie(default=None,alias=settings.REFRESH_COOKIE_NAME)):
@@ -51,8 +52,8 @@ def refresh(request_body:RefreshRequest,request:Request,response:Response,db:Ses
  if not refresh_token:raise HTTPException(status_code=401,detail='Invalid session')
  try:issued=rotate_refresh_token(db,session_id=request_body.session_id,organization_id=request_body.organization_id,refresh_token=refresh_token)
  except(RefreshReplayDetected,InvalidSession):_clear_refresh_cookie(response);clear_csrf_cookie(response);raise HTTPException(status_code=401,detail='Invalid session')
- user=db.query(User).filter(User.id==issued.session.user_id,User.organization_id==issued.session.organization_id,User.is_active.is_(True)).first()
- if not user:raise HTTPException(status_code=401,detail='Invalid session')
+ user=db.query(User).join(Organization,Organization.id==User.organization_id).filter(User.id==issued.session.user_id,User.organization_id==issued.session.organization_id,User.is_active.is_(True),Organization.is_active.is_(True)).first()
+ if not user:revoke_session(db,session_id=issued.session.id,user_id=issued.session.user_id,organization_id=issued.session.organization_id,reason='account_inactive');_clear_refresh_cookie(response);clear_csrf_cookie(response);raise HTTPException(status_code=401,detail='Invalid session')
  token=create_access_token(subject=user.id,organization_id=user.organization_id,session_id=issued.session.id);_set_refresh_cookie(response,issued.refresh_token);return {'access_token':token,'session_id':issued.session.id,'token_type':'bearer'}
 @router.get('/sessions',response_model=list[SessionView])
 def sessions(db:Session=Depends(get_db),current_user:User=Depends(get_current_user)):return list_active_sessions(db,user_id=current_user.id,organization_id=current_user.organization_id)
@@ -60,6 +61,7 @@ def sessions(db:Session=Depends(get_db),current_user:User=Depends(get_current_us
 def delete_session(session_id:UUID,request:Request,response:Response,db:Session=Depends(get_db),current_user:User=Depends(get_current_user)):
  require_csrf(request)
  if not revoke_session(db,session_id=session_id,user_id=current_user.id,organization_id=current_user.organization_id,reason='user_revoked'):raise HTTPException(status_code=404,detail='Session not found')
+ if str(session_id)==str(request.headers.get('x-session-id','')):_clear_refresh_cookie(response);clear_csrf_cookie(response)
 @router.post('/logout',status_code=204)
 def logout(request_body:LogoutRequest,request:Request,response:Response,db:Session=Depends(get_db),current_user:User=Depends(get_current_user)):require_csrf(request);revoke_session(db,session_id=request_body.session_id,user_id=current_user.id,organization_id=current_user.organization_id);_clear_refresh_cookie(response);clear_csrf_cookie(response)
 @router.post('/logout-all',status_code=204)
