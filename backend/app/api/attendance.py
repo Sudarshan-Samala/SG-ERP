@@ -43,6 +43,13 @@ def _attendance_query(db, org_id, current_user, branch_id=None, student_id=None,
     return query.order_by(AttendanceModel.date.desc())
 
 
+def _constraint_name(exc: IntegrityError):
+    """Return the violated database constraint name when the driver exposes it."""
+    orig = getattr(exc, 'orig', None)
+    diag = getattr(orig, 'diag', None)
+    return getattr(diag, 'constraint_name', None)
+
+
 @router.get('/', response_model=List[Attendance])
 def read_attendance(db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), branch_id: Optional[UUID] = None, student_id: Optional[UUID] = None, date: Optional[datetime] = None, skip: int = 0, limit: int = 100, current_user: User = Depends(require_permission('attendance.read'))):
     page_limit = min(max(limit, 1), 500)
@@ -113,7 +120,9 @@ def bulk_attendance(payload: BulkAttendanceRequest, db: Session = Depends(get_db
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail='Attendance has already been marked for one or more students on this date.') from exc
+        if _constraint_name(exc) == 'uq_attendance_student_daily':
+            raise HTTPException(status_code=409, detail='Attendance has already been marked for one or more students on this date.') from exc
+        raise
     except Exception:
         db.rollback()
         raise
