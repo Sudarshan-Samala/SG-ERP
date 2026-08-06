@@ -1,166 +1,94 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import accessible_branch_ids, enforce_branch_access, get_current_organization, require_permission
 from app.core.database import get_db
 from app.models.base import Attendance, Exam, ExamResult, Invoice, Organization, Payment, Subject, User
-from app.schemas.student import Student, StudentCreate
-from app.services.student_service import create_student, delete_student, get_student, get_students, update_student
+from app.schemas.student import Student, StudentCreate, StudentStatusUpdate, StudentUpdate
+from app.services.student_service import archive_student, change_student_status, create_student, get_student, get_student_by_number, get_students, update_student
 
 router = APIRouter()
 
 
 def _permission_names(current_user: User) -> set[str]:
-    return {
-        permission.name
-        for role in current_user.roles
-        if role.organization_id in (None, current_user.organization_id)
-        for permission in role.permissions
-    }
+    return {permission.name for role in current_user.roles if role.organization_id in (None, current_user.organization_id) for permission in role.permissions}
 
 
-@router.get("/", response_model=List[Student])
-def read_students(
-    db: Session = Depends(get_db),
-    current_org: Organization = Depends(get_current_organization),
-    current_user: User = Depends(require_permission("students.read")),
-):
-    # Listing students is branch scoped. A user with no assigned branches sees
-    # no student records rather than receiving tenant-wide data implicitly.
-    return get_students(
-        db,
-        organization_id=current_org.id,
-        branch_ids=accessible_branch_ids(current_user),
-    )
-
-
-@router.get("/{student_id}/profile")
-def read_student_profile(
-    student_id: UUID,
-    db: Session = Depends(get_db),
-    current_org: Organization = Depends(get_current_organization),
-    current_user: User = Depends(require_permission("students.read")),
-):
+def _scoped_student_or_404(db: Session, student_id: UUID, current_org: Organization, current_user: User):
     student = get_student(db, student_id, current_org.id)
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
     enforce_branch_access(current_user, student.branch_id)
+    return student
 
+
+@router.get("/", response_model=List[Student])
+def read_students(db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.read"))):
+    return get_students(db, organization_id=current_org.id, branch_ids=accessible_branch_ids(current_user))
+
+
+@router.get("/by-number/{student_number}", response_model=Student)
+def read_student_by_number(student_number: int, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.read"))):
+    if student_number < 100000:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    student = get_student_by_number(db, student_number, current_org.id)
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    enforce_branch_access(current_user, student.branch_id)
+    return student
+
+
+@router.get("/{student_id}/profile")
+def read_student_profile(student_id: UUID, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.read"))):
+    student = _scoped_student_or_404(db, student_id, current_org, current_user)
     permissions = _permission_names(current_user)
     payload = {"student": student, "attendance": None, "fees": None, "results": []}
-
     if "attendance.read" in permissions:
-        total = (
-            db.query(Attendance)
-            .filter(
-                Attendance.organization_id == current_org.id,
-                Attendance.student_id == student.id,
-            )
-            .count()
-        )
-        present = (
-            db.query(Attendance)
-            .filter(
-                Attendance.organization_id == current_org.id,
-                Attendance.student_id == student.id,
-                Attendance.status == "PRESENT",
-            )
-            .count()
-        )
-        payload["attendance"] = {
-            "total_days": total,
-            "present_days": present,
-            "percentage": round((present / total * 100), 1) if total else None,
-        }
-
+        total = db.query(Attendance).filter(Attendance.organization_id == current_org.id, Attendance.student_id == student.id).count()
+        present = db.query(Attendance).filter(Attendance.organization_id == current_org.id, Attendance.student_id == student.id, Attendance.status == "PRESENT").count()
+        payload["attendance"] = {"total_days": total, "present_days": present, "percentage": round((present / total * 100), 1) if total else None}
     if "fees.read" in permissions:
-        invoices = (
-            db.query(Invoice)
-            .filter(
-                Invoice.organization_id == current_org.id,
-                Invoice.student_id == student.id,
-            )
-            .all()
-        )
+        invoices = db.query(Invoice).filter(Invoice.organization_id == current_org.id, Invoice.student_id == student.id).all()
         invoice_ids = [invoice.id for invoice in invoices]
-        paid = (
-            int(
-                db.query(func.coalesce(func.sum(Payment.amount_paid), 0))
-                .filter(
-                    Payment.organization_id == current_org.id,
-                    Payment.invoice_id.in_(invoice_ids),
-                )
-                .scalar()
-                or 0
-            )
-            if invoice_ids
-            else 0
-        )
+        paid = int(db.query(func.coalesce(func.sum(Payment.amount_paid), 0)).filter(Payment.organization_id == current_org.id, Payment.invoice_id.in_(invoice_ids)).scalar() or 0) if invoice_ids else 0
         due = sum(invoice.amount_due for invoice in invoices)
         payload["fees"] = {"invoiced": due, "paid": paid, "balance": max(due - paid, 0)}
-
-    if "exams.read" in permissions:
-        rows = (
-            db.query(ExamResult, Exam.name, Subject.name)
-            .join(Exam, Exam.id == ExamResult.exam_id)
-            .join(Subject, Subject.id == ExamResult.subject_id)
-            .filter(
-                ExamResult.organization_id == current_org.id,
-                ExamResult.student_id == student.id,
-            )
-            .order_by(Exam.start_date.desc(), Subject.name)
-            .limit(50)
-            .all()
-        )
-        payload["results"] = [
-            {"exam": exam_name, "subject": subject_name, "marks": result.marks_obtained}
-            for result, exam_name, subject_name in rows
-        ]
-
+    if "exam.result.read" in permissions:
+        rows = db.query(ExamResult, Exam.name, Subject.name).join(Exam, Exam.id == ExamResult.exam_id).join(Subject, Subject.id == ExamResult.subject_id).filter(ExamResult.organization_id == current_org.id, ExamResult.student_id == student.id).order_by(Exam.start_date.desc(), Subject.name).limit(50).all()
+        payload["results"] = [{"exam": exam_name, "subject": subject_name, "marks": result.marks_obtained} for result, exam_name, subject_name in rows]
     return payload
 
 
-@router.post("/", response_model=Student)
-def create_student_endpoint(
-    student_in: StudentCreate,
-    db: Session = Depends(get_db),
-    current_org: Organization = Depends(get_current_organization),
-    current_user: User = Depends(require_permission("students.create")),
-):
+@router.post("/", response_model=Student, status_code=status.HTTP_201_CREATED)
+def create_student_endpoint(student_in: StudentCreate, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.create"))):
     enforce_branch_access(current_user, student_in.branch_id)
     return create_student(db, student_in, current_org.id, current_user.id)
 
 
 @router.put("/{student_id}", response_model=Student)
-def update_student_endpoint(
-    student_id: UUID,
-    student_in: StudentCreate,
-    db: Session = Depends(get_db),
-    current_org: Organization = Depends(get_current_organization),
-    current_user: User = Depends(require_permission("students.manage")),
-):
-    existing = get_student(db, student_id, current_org.id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
-    enforce_branch_access(current_user, existing.branch_id)
+def update_student_endpoint(student_id: UUID, student_in: StudentUpdate, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.edit"))):
+    existing = _scoped_student_or_404(db, student_id, current_org, current_user)
     enforce_branch_access(current_user, student_in.branch_id)
-    return update_student(db, student_id, student_in, current_org.id, current_user.id)
+    return update_student(db, existing.id, student_in, current_org.id, current_user.id)
 
 
-@router.delete("/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_student_endpoint(
-    student_id: UUID,
-    db: Session = Depends(get_db),
-    current_org: Organization = Depends(get_current_organization),
-    current_user: User = Depends(require_permission("students.manage")),
-):
-    existing = get_student(db, student_id, current_org.id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
-    enforce_branch_access(current_user, existing.branch_id)
-    delete_student(db, student_id, current_org.id, current_user.id)
-    return None
+@router.patch("/{student_id}/status", response_model=Student)
+def update_student_status_endpoint(student_id: UUID, status_in: StudentStatusUpdate, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.status.manage"))):
+    existing = _scoped_student_or_404(db, student_id, current_org, current_user)
+    return change_student_status(db, existing.id, status_in, current_org.id, current_user.id)
+
+
+@router.post("/{student_id}/archive", response_model=Student)
+def archive_student_endpoint(student_id: UUID, reason: str = Query(min_length=3, max_length=500), db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.archive"))):
+    existing = _scoped_student_or_404(db, student_id, current_org, current_user)
+    return archive_student(db, existing.id, reason, current_org.id, current_user.id)
+
+
+@router.delete("/{student_id}", status_code=status.HTTP_409_CONFLICT)
+def delete_student_endpoint(student_id: UUID, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission("students.delete"))):
+    _scoped_student_or_404(db, student_id, current_org, current_user)
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Permanent student deletion is disabled. Archive the student to preserve institutional identity and history.")
