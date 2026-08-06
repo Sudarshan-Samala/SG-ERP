@@ -6,13 +6,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import accessible_branch_ids, enforce_branch_access, get_current_organization, require_permission
 from app.core.database import get_db
 from app.models.base import Attendance as AttendanceModel, Organization, Student, User
 from app.schemas.attendance import Attendance, AttendanceCreate
-from app.services.attendance_service import get_attendance
 
 router = APIRouter()
 
@@ -111,6 +111,9 @@ def bulk_attendance(payload: BulkAttendanceRequest, db: Session = Depends(get_db
         db.add(AttendanceModel(branch_id=payload.branch_id, student_id=sid, date=payload.date, status=status_value, organization_id=current_org.id))
     try:
         db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail='Attendance has already been marked for one or more students on this date.') from exc
     except Exception:
         db.rollback()
         raise
