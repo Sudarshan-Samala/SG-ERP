@@ -1,83 +1,171 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.base import Organization, Branch
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.schemas.branch import BranchCreate
 from app.services.audit.audit_service import log_action
 from uuid import UUID
 
+
+def _normalize_name(value: str) -> str:
+    return " ".join(value.strip().split())
+
+
+def _normalize_code(value: str) -> str:
+    return value.strip().upper()
+
+
 # Organization CRUD
 def get_organizations(db: Session):
-    return db.query(Organization).all()
+    return db.query(Organization).order_by(Organization.name.asc()).all()
 
-def get_organization(db: Session, org_id: UUID):
-    return db.query(Organization).filter(Organization.id == org_id).first()
+
+def get_organization(db: Session, org_id: UUID, *, for_update: bool = False):
+    query = db.query(Organization).filter(Organization.id == org_id)
+    if for_update:
+        query = query.with_for_update()
+    return query.first()
+
 
 def create_organization(db: Session, org_in: OrganizationCreate, user_id: UUID):
-    org = Organization(name=org_in.name, is_active=org_in.is_active)
-    db.add(org)
-    db.commit()
-    db.refresh(org)
-    log_action(db, org.id, user_id, "CREATE", "ORGANIZATION", org.id, new_values=str(org_in.dict()))
-    return org
+    name = _normalize_name(org_in.name)
+    if not name:
+        raise ValueError("Organization name is required")
+    org = Organization(name=name, is_active=org_in.is_active)
+    try:
+        db.add(org)
+        db.flush()
+        log_action(db, org.id, user_id, "CREATE", "ORGANIZATION", org.id, new_values=str({"name": name, "is_active": org.is_active}))
+        db.commit()
+        db.refresh(org)
+        return org
+    except Exception:
+        db.rollback()
+        raise
+
 
 def update_organization(db: Session, org_id: UUID, org_in: OrganizationUpdate, user_id: UUID):
-    org = get_organization(db, org_id)
+    org = get_organization(db, org_id, for_update=True)
     if not org:
         return None
-    previous_values = str(org.__dict__)
-    for field, value in org_in.dict(exclude_unset=True).items():
-        setattr(org, field, value)
-    db.commit()
-    db.refresh(org)
-    log_action(db, org.id, user_id, "UPDATE", "ORGANIZATION", org.id, previous_values=previous_values, new_values=str(org_in.dict(exclude_unset=True)))
-    return org
+    previous_values = {"name": org.name, "is_active": org.is_active}
+    updates = org_in.dict(exclude_unset=True)
+    if "name" in updates:
+        updates["name"] = _normalize_name(updates["name"])
+        if not updates["name"]:
+            raise ValueError("Organization name is required")
+    try:
+        for field, value in updates.items():
+            setattr(org, field, value)
+        db.flush()
+        log_action(db, org.id, user_id, "UPDATE", "ORGANIZATION", org.id, previous_values=str(previous_values), new_values=str(updates))
+        db.commit()
+        db.refresh(org)
+        return org
+    except Exception:
+        db.rollback()
+        raise
+
 
 def delete_organization(db: Session, org_id: UUID, user_id: UUID):
-    org = get_organization(db, org_id)
+    org = get_organization(db, org_id, for_update=True)
     if not org:
         return False
-    db.delete(org)
-    db.commit()
-    log_action(db, org.id, user_id, "DELETE", "ORGANIZATION", org_id)
-    return True
+    # Hard-deleting a tenant is unsafe once dependent ERP records exist. Only
+    # permit deletion of a truly empty tenant; otherwise callers should disable it.
+    if db.query(Branch.id).filter(Branch.organization_id == org_id).first():
+        raise ValueError("Organization has branches; deactivate it instead of deleting")
+    try:
+        log_action(db, org.id, user_id, "DELETE", "ORGANIZATION", org_id, previous_values=str({"name": org.name, "is_active": org.is_active}))
+        db.delete(org)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+
 
 # Branch CRUD (Tenant Scoped)
 def get_branches(db: Session, organization_id: UUID):
-    return db.query(Branch).filter(Branch.organization_id == organization_id).all()
+    return db.query(Branch).filter(Branch.organization_id == organization_id).order_by(Branch.name.asc()).all()
 
-def get_branch(db: Session, branch_id: UUID, organization_id: UUID):
-    return db.query(Branch).filter(Branch.id == branch_id, Branch.organization_id == organization_id).first()
+
+def get_branch(db: Session, branch_id: UUID, organization_id: UUID, *, for_update: bool = False):
+    query = db.query(Branch).filter(Branch.id == branch_id, Branch.organization_id == organization_id)
+    if for_update:
+        query = query.with_for_update()
+    return query.first()
+
 
 def create_branch(db: Session, branch_in: BranchCreate, organization_id: UUID, user_id: UUID):
-    branch = Branch(
-        name=branch_in.name,
-        code=branch_in.code,
-        is_active=branch_in.is_active,
-        organization_id=organization_id,
-    )
-    db.add(branch)
-    db.commit()
-    db.refresh(branch)
-    log_action(db, organization_id, user_id, "CREATE", "BRANCH", branch.id, new_values=str(branch_in.dict()))
-    return branch
+    name = _normalize_name(branch_in.name)
+    code = _normalize_code(branch_in.code)
+    if not name or not code:
+        raise ValueError("Branch name and code are required")
+    duplicate = db.query(Branch.id).filter(Branch.organization_id == organization_id, Branch.code == code).first()
+    if duplicate:
+        raise ValueError("Branch code already exists")
+    branch = Branch(name=name, code=code, is_active=branch_in.is_active, organization_id=organization_id)
+    try:
+        db.add(branch)
+        db.flush()
+        log_action(db, organization_id, user_id, "CREATE", "BRANCH", branch.id, new_values=str({"name": name, "code": code, "is_active": branch.is_active}))
+        db.commit()
+        db.refresh(branch)
+        return branch
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError("Branch already exists") from exc
+    except Exception:
+        db.rollback()
+        raise
+
 
 def update_branch(db: Session, branch_id: UUID, branch_in: BranchCreate, organization_id: UUID, user_id: UUID):
-    branch = get_branch(db, branch_id, organization_id)
+    branch = get_branch(db, branch_id, organization_id, for_update=True)
     if not branch:
         return None
-    previous_values = str(branch.__dict__)
-    for field, value in branch_in.dict(exclude_unset=True).items():
-        setattr(branch, field, value)
-    db.commit()
-    db.refresh(branch)
-    log_action(db, organization_id, user_id, "UPDATE", "BRANCH", branch.id, previous_values=previous_values, new_values=str(branch_in.dict(exclude_unset=True)))
-    return branch
+    name = _normalize_name(branch_in.name)
+    code = _normalize_code(branch_in.code)
+    if not name or not code:
+        raise ValueError("Branch name and code are required")
+    duplicate = db.query(Branch.id).filter(Branch.organization_id == organization_id, Branch.code == code, Branch.id != branch_id).first()
+    if duplicate:
+        raise ValueError("Branch code already exists")
+    previous_values = {"name": branch.name, "code": branch.code, "is_active": branch.is_active}
+    updates = {"name": name, "code": code, "is_active": branch_in.is_active}
+    try:
+        for field, value in updates.items():
+            setattr(branch, field, value)
+        db.flush()
+        log_action(db, organization_id, user_id, "UPDATE", "BRANCH", branch.id, previous_values=str(previous_values), new_values=str(updates))
+        db.commit()
+        db.refresh(branch)
+        return branch
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError("Branch already exists") from exc
+    except Exception:
+        db.rollback()
+        raise
+
 
 def delete_branch(db: Session, branch_id: UUID, organization_id: UUID, user_id: UUID):
-    branch = get_branch(db, branch_id, organization_id)
+    branch = get_branch(db, branch_id, organization_id, for_update=True)
     if not branch:
         return False
-    db.delete(branch)
-    db.commit()
-    log_action(db, organization_id, user_id, "DELETE", "BRANCH", branch_id)
-    return True
+    # Branches are tenant boundaries referenced throughout the ERP. Preserve
+    # referential history by requiring deactivation rather than hard deletion.
+    if branch.is_active:
+        raise ValueError("Deactivate the branch before deleting it")
+    try:
+        log_action(db, organization_id, user_id, "DELETE", "BRANCH", branch_id, previous_values=str({"name": branch.name, "code": branch.code, "is_active": branch.is_active}))
+        db.delete(branch)
+        db.commit()
+        return True
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError("Branch is referenced by ERP records; keep it inactive instead") from exc
+    except Exception:
+        db.rollback()
+        raise
