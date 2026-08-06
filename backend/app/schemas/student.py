@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+StudentStatus = Literal["ACTIVE", "INACTIVE", "TRANSFERRED", "WITHDRAWN", "GRADUATED", "ALUMNI", "ARCHIVED"]
+
 
 class StudentBase(BaseModel):
     branch_id: UUID
@@ -35,9 +37,30 @@ class StudentCreate(StudentBase):
     pass
 
 
+class StudentUpdate(StudentBase):
+    """Editable master-data fields; permanent student identity is excluded."""
+    pass
+
+
+class StudentStatusUpdate(BaseModel):
+    status: StudentStatus
+    reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def strip_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("reason must not be blank")
+        return value
+
+
 class Student(StudentBase):
     id: UUID
     organization_id: UUID
+    student_number: int
+    status: StudentStatus
+    status_changed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
