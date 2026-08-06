@@ -9,8 +9,13 @@ from app.schemas.student import StudentCreate
 from app.services.audit.audit_service import log_action
 
 
-def get_students(db: Session, organization_id: UUID):
-    return db.query(Student).filter(Student.organization_id == organization_id).order_by(Student.student_name).all()
+def get_students(db: Session, organization_id: UUID, branch_ids: set[UUID] | None = None):
+    query = db.query(Student).filter(Student.organization_id == organization_id)
+    if branch_ids is not None:
+        if not branch_ids:
+            return []
+        query = query.filter(Student.branch_id.in_(branch_ids))
+    return query.order_by(Student.student_name).all()
 
 
 def get_student(db: Session, student_id: UUID, organization_id: UUID):
@@ -50,11 +55,13 @@ def create_student(db: Session, student_in: StudentCreate, organization_id: UUID
 
 def update_student(db: Session, student_id: UUID, student_in: StudentCreate, organization_id: UUID, user_id: UUID):
     student = get_student(db, student_id, organization_id)
-    if not student: return None
+    if not student:
+        return None
     _validate_student_scope(db, student_in, organization_id)
     _ensure_admission_number_available(db, student_in.admission_number, organization_id, student.id)
     previous_values = str(student.__dict__)
-    for field, value in student_in.model_dump(exclude_unset=True).items(): setattr(student, field, value)
+    for field, value in student_in.model_dump(exclude_unset=True).items():
+        setattr(student, field, value)
     try:
         db.commit(); db.refresh(student)
     except IntegrityError:
@@ -66,6 +73,7 @@ def update_student(db: Session, student_id: UUID, student_in: StudentCreate, org
 
 def delete_student(db: Session, student_id: UUID, organization_id: UUID, user_id: UUID):
     student = get_student(db, student_id, organization_id)
-    if not student: return False
+    if not student:
+        return False
     db.delete(student); db.commit(); log_action(db, organization_id, user_id, "DELETE", "STUDENT", student_id)
     return True
