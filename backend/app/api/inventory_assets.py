@@ -38,10 +38,10 @@ def inventory_movements_csv(item_id:UUID|None=None,db:Session=Depends(get_db),cu
   before=json.loads(x.previous_values or '{}');after=json.loads(x.new_values or '{}');w.writerow([items.get(x.entity_id,'Inventory item'),after.get('delta',''),before.get('quantity',''),after.get('quantity',''),x.user_id or '',x.created_at.isoformat()])
  return Response(out.getvalue(),media_type='text/csv',headers={'Content-Disposition':'attachment; filename="inventory-movements.csv"'})
 @router.post('/inventory',response_model=InventoryItem)
-def create_inventory(item_in:InventoryItemCreate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('inventory.manage'))):return create_inventory_item(db,item_in,current_org.id)
+def create_inventory(item_in:InventoryItemCreate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('inventory.manage'))):return create_inventory_item(db,item_in,current_org.id,current_user.id)
 @router.put('/inventory/{item_id}',response_model=InventoryItem)
-def update_inventory(item_id:UUID,item_in:InventoryItemUpdate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('inventory.manage'))):
- item=update_inventory_item(db,item_id,item_in,current_org.id)
+def update_inventory(item_id:UUID,item_in:InventoryItemUpdate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('inventory.manage'))):
+ item=update_inventory_item(db,item_id,item_in,current_org.id,current_user.id)
  if not item:raise HTTPException(status_code=404,detail='Item not found')
  return item
 @router.post('/inventory/{item_id}/adjust',response_model=InventoryItem)
@@ -55,10 +55,10 @@ def delete_inventory(item_id:UUID,db:Session=Depends(get_db),current_org:Organiz
 @router.get('/assets',response_model=List[Asset])
 def read_assets(db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('assets.read'))):return get_assets(db,current_org.id)
 @router.post('/assets',response_model=Asset)
-def create_asset_endpoint(asset_in:AssetCreate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('assets.manage'))):return create_asset(db,asset_in,current_org.id)
+def create_asset_endpoint(asset_in:AssetCreate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('assets.manage'))):return create_asset(db,asset_in,current_org.id,current_user.id)
 @router.put('/assets/{asset_id}',response_model=Asset)
-def update_asset_endpoint(asset_id:UUID,asset_in:AssetUpdate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('assets.manage'))):
- asset=update_asset(db,asset_id,asset_in,current_org.id)
+def update_asset_endpoint(asset_id:UUID,asset_in:AssetUpdate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('assets.manage'))):
+ asset=update_asset(db,asset_id,asset_in,current_org.id,current_user.id)
  if not asset:raise HTTPException(status_code=404,detail='Asset not found')
  return asset
 @router.delete('/assets/{asset_id}',status_code=status.HTTP_204_NO_CONTENT)
