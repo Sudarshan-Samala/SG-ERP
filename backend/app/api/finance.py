@@ -22,6 +22,18 @@ def read_finance_summary(db:Session=Depends(get_db),current_org:Organization=Dep
 def reconciliation(db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),start_date:Optional[datetime]=None,end_date:Optional[datetime]=None,_:User=Depends(require_permission('finance.read'))):
     summary=get_finance_summary(db,current_org.id,start_date,end_date);difference=round(float(summary['difference']),2)
     return {**summary,'balanced':abs(difference)<0.01,'difference':difference,'status':'BALANCED' if abs(difference)<0.01 else 'REVIEW_REQUIRED'}
+@router.get('/reconciliation/drilldown')
+def reconciliation_drilldown(db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),start_date:Optional[datetime]=None,end_date:Optional[datetime]=None,_:User=Depends(require_permission('finance.read'))):
+    accounts={a.id:a for a in get_accounts(db,current_org.id)};rows=get_journal_entries(db,current_org.id,None,start_date,end_date);totals={}
+    for row in rows:
+        bucket=totals.setdefault(row.account_id,{'debit':0.0,'credit':0.0,'entries':0});bucket[row.type.upper().lower()]=bucket.get(row.type.upper().lower(),0.0)+float(row.amount);bucket['entries']+=1
+    result=[]
+    for account_id,bucket in totals.items():
+        account=accounts.get(account_id)
+        if not account:continue
+        debit=round(bucket['debit'],2);credit=round(bucket['credit'],2);difference=round(debit-credit,2)
+        result.append({'account_id':account_id,'account_name':account.name,'account_type':account.type,'entries':bucket['entries'],'total_debit':debit,'total_credit':credit,'difference':difference,'balanced':abs(difference)<0.01})
+    return sorted(result,key=lambda item:(-abs(item['difference']),item['account_name'].lower()))
 @router.get('/journal/export')
 def export_journal(db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),start_date:Optional[datetime]=None,end_date:Optional[datetime]=None,_:User=Depends(require_permission('finance.read'))):
     accounts={a.id:a.name for a in get_accounts(db,current_org.id)};rows=get_journal_entries(db,current_org.id,None,start_date,end_date);out=io.StringIO();writer=csv.writer(out);writer.writerow(['Date','Account','Description','Type','Amount'])
