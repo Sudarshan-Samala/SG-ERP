@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -40,7 +41,7 @@ def _attendance_query(db, org_id, current_user, branch_id=None, student_id=None,
     if date:
         day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
         query = query.filter(AttendanceModel.date >= day_start, AttendanceModel.date < day_start + timedelta(days=1))
-    return query.order_by(AttendanceModel.date.desc())
+    return query.order_by(AttendanceModel.date.desc(), AttendanceModel.id.desc())
 
 
 def _constraint_name(exc: IntegrityError):
@@ -48,6 +49,23 @@ def _constraint_name(exc: IntegrityError):
     orig = getattr(exc, 'orig', None)
     diag = getattr(orig, 'diag', None)
     return getattr(diag, 'constraint_name', None)
+
+
+def _csv_chunk(rows, students, include_header=False):
+    out = io.StringIO()
+    writer = csv.writer(out)
+    if include_header:
+        writer.writerow(['date', 'admission_number', 'student_name', 'branch_id', 'status'])
+    for row in rows:
+        student = students.get(row.student_id)
+        writer.writerow([
+            row.date.date().isoformat(),
+            student.admission_number if student else '',
+            student.student_name if student else '',
+            str(row.branch_id),
+            row.status,
+        ])
+    return out.getvalue()
 
 
 @router.get('/', response_model=List[Attendance])
@@ -58,17 +76,38 @@ def read_attendance(db: Session = Depends(get_db), current_org: Organization = D
 
 @router.get('/export.csv')
 def attendance_export(branch_id: Optional[UUID] = None, date: Optional[datetime] = None, db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), current_user: User = Depends(require_permission('attendance.read'))):
-    rows = _attendance_query(db, current_org.id, current_user, branch_id, None, date).all()
-    student_ids = {row.student_id for row in rows}
-    students = {student.id: student for student in db.query(Student).filter(Student.organization_id == current_org.id, Student.id.in_(student_ids)).all()} if student_ids else {}
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(['date', 'admission_number', 'student_name', 'branch_id', 'status'])
-    for row in rows:
-        student = students.get(row.student_id)
-        writer.writerow([row.date.date().isoformat(), student.admission_number if student else '', student.student_name if student else '', str(row.branch_id), row.status])
+    query = _attendance_query(db, current_org.id, current_user, branch_id, None, date)
+
+    def generate_csv():
+        batch_size = 1000
+        offset = 0
+        first_batch = True
+        while True:
+            rows = query.offset(offset).limit(batch_size).all()
+            if not rows:
+                if first_batch:
+                    yield _csv_chunk([], {}, include_header=True)
+                break
+            student_ids = {row.student_id for row in rows}
+            students = {
+                student.id: student
+                for student in db.query(Student).filter(
+                    Student.organization_id == current_org.id,
+                    Student.id.in_(student_ids),
+                ).all()
+            }
+            yield _csv_chunk(rows, students, include_header=first_batch)
+            first_batch = False
+            offset += len(rows)
+            if len(rows) < batch_size:
+                break
+
     suffix = date.date().isoformat() if date else 'all'
-    return Response(content=out.getvalue(), media_type='text/csv', headers={'Content-Disposition': f'attachment; filename="attendance-{suffix}.csv"'})
+    return StreamingResponse(
+        generate_csv(),
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="attendance-{suffix}.csv"'},
+    )
 
 
 @router.get('/exceptions')
@@ -83,8 +122,23 @@ def attendance_exceptions(date: datetime, branch_id: Optional[UUID] = None, db: 
         students = students.filter(Student.branch_id.in_(allowed)) if allowed else students.filter(False)
     student_rows = students.all()
     marked_ids = {row.student_id for row in _attendance_query(db, current_org.id, current_user, branch_id, None, date).all()}
-    missing = [{'student_id': student.id, 'student_name': student.student_name, 'admission_number': student.admission_number, 'branch_id': student.branch_id} for student in student_rows if student.id not in marked_ids]
-    return {'date': date.date().isoformat(), 'students': len(student_rows), 'marked': len(marked_ids), 'missing_count': len(missing), 'missing': missing}
+    missing = [
+        {
+            'student_id': student.id,
+            'student_name': student.student_name,
+            'admission_number': student.admission_number,
+            'branch_id': student.branch_id,
+        }
+        for student in student_rows
+        if student.id not in marked_ids
+    ]
+    return {
+        'date': date.date().isoformat(),
+        'students': len(student_rows),
+        'marked': len(marked_ids),
+        'missing_count': len(missing),
+        'missing': missing,
+    }
 
 
 @router.post('/bulk')
@@ -93,8 +147,9 @@ def bulk_attendance(payload: BulkAttendanceRequest, db: Session = Depends(get_db
     now = datetime.now(timezone.utc) if payload.date.tzinfo else datetime.now()
     if payload.date.date() > now.date():
         raise HTTPException(status_code=400, detail='Attendance cannot be marked for a future date')
+
     seen = set()
-    validated = []
+    parsed = []
     for item in payload.records:
         try:
             sid = UUID(str(item.get('student_id')))
@@ -106,16 +161,37 @@ def bulk_attendance(payload: BulkAttendanceRequest, db: Session = Depends(get_db
         seen.add(sid)
         if status_value not in {'PRESENT', 'ABSENT', 'LATE'}:
             raise HTTPException(status_code=400, detail='Invalid attendance status')
-        student = db.query(Student).filter(Student.id == sid, Student.organization_id == current_org.id, Student.branch_id == payload.branch_id).first()
-        if not student:
-            raise HTTPException(status_code=400, detail='Student does not belong to the selected branch')
-        validated.append((sid, status_value))
+        parsed.append((sid, status_value))
+
+    students = {
+        student.id: student
+        for student in db.query(Student).filter(
+            Student.id.in_(seen),
+            Student.organization_id == current_org.id,
+            Student.branch_id == payload.branch_id,
+        ).all()
+    }
+    if len(students) != len(seen):
+        raise HTTPException(status_code=400, detail='Student does not belong to the selected branch')
+
     day_start = payload.date.replace(hour=0, minute=0, second=0, microsecond=0)
-    existing = db.query(AttendanceModel.student_id).filter(AttendanceModel.organization_id == current_org.id, AttendanceModel.student_id.in_(seen), AttendanceModel.date >= day_start, AttendanceModel.date < day_start + timedelta(days=1)).first()
+    existing = db.query(AttendanceModel.student_id).filter(
+        AttendanceModel.organization_id == current_org.id,
+        AttendanceModel.student_id.in_(seen),
+        AttendanceModel.date >= day_start,
+        AttendanceModel.date < day_start + timedelta(days=1),
+    ).first()
     if existing:
         raise HTTPException(status_code=409, detail='Attendance has already been marked for one or more students on this date.')
-    for sid, status_value in validated:
-        db.add(AttendanceModel(branch_id=payload.branch_id, student_id=sid, date=payload.date, status=status_value, organization_id=current_org.id))
+
+    for sid, status_value in parsed:
+        db.add(AttendanceModel(
+            branch_id=payload.branch_id,
+            student_id=sid,
+            date=payload.date,
+            status=status_value,
+            organization_id=current_org.id,
+        ))
     try:
         db.commit()
     except IntegrityError as exc:
@@ -126,7 +202,7 @@ def bulk_attendance(payload: BulkAttendanceRequest, db: Session = Depends(get_db
     except Exception:
         db.rollback()
         raise
-    return {'created': len(validated)}
+    return {'created': len(parsed)}
 
 
 @router.post('/', response_model=Attendance)
