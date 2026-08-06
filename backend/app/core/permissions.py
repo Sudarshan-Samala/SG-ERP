@@ -1,6 +1,6 @@
 PERMISSIONS = {
     "rbac.manage": "Manage tenant roles and user role assignments", "users.manage": "Manage tenant users and branch assignments", "branches.read": "View organization branches", "branches.manage": "Create, update and remove organization branches",
-    "students.read": "View student records", "students.create": "Create student records", "students.manage": "Update and remove student records",
+    "students.read": "View student records", "students.create": "Create student records", "students.edit": "Edit student master data", "students.status.manage": "Manage student lifecycle status", "students.archive": "Archive student records", "students.delete": "Permanently delete eligible student records", "students.manage": "Legacy student management permission",
     "admissions.read": "View admission enquiries", "admissions.manage": "Create and manage admission enquiries",
     "attendance.read": "View student attendance", "attendance.mark": "Mark student attendance",
     "fees.read": "View fee types, structures, invoices and payments", "fees.manage": "Manage fee types and fee structures", "fees.invoice.create": "Create student fee invoices", "fees.payment.collect": "Record fee payments",
@@ -17,7 +17,7 @@ ROLE_PERMISSION_SETS = {
     "ERP Admin": set(PERMISSIONS),
     "Admissions Officer": {"admissions.read", "admissions.manage", "students.read", "students.create"},
     "Teacher": {"students.read", "attendance.read", "attendance.mark", "exam.read", "exam.result.read"},
-    "Student Records Manager": {"students.read", "students.create", "students.manage", "admissions.read"},
+    "Student Records Manager": {"students.read", "students.create", "students.edit", "students.status.manage", "students.archive", "admissions.read"},
     "Finance Manager": {"fees.read", "fees.manage", "fees.invoice.create", "fees.payment.collect", "finance.read", "finance.manage"},
     "HR Manager": {"hr.employee.read", "hr.employee.create", "hr.salary.read", "hr.salary.manage", "hr.payroll.read", "hr.payroll.create"},
     "Exam Manager": {"exam.read", "exam.manage", "exam.schedule.manage", "exam.result.read", "exam.result.create"},
