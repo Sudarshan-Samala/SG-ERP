@@ -42,10 +42,16 @@ def get_payments(db,organization_id,invoice_id=None,branch_ids=None):
     if invoice_id:q=q.filter(Payment.invoice_id==invoice_id)
     return q.order_by(Payment.payment_date.desc()).all()
 def create_payment(db,payment_in,organization_id,user_id):
-    invoice=db.query(Invoice).filter(Invoice.id==payment_in.invoice_id,Invoice.organization_id==organization_id).with_for_update().first()
-    if not invoice: raise HTTPException(status_code=400,detail='Invoice is not available in this organization')
-    if invoice.status.upper() in {'CANCELLED','PAID'}: raise HTTPException(status_code=409,detail='Payments cannot be recorded against a closed invoice')
-    paid=sum(row.amount_paid for row in db.query(Payment).filter(Payment.organization_id==organization_id,Payment.invoice_id==invoice.id).all());outstanding=invoice.amount_due-paid
-    if payment_in.amount_paid<=0: raise HTTPException(status_code=422,detail='Payment amount must be greater than zero')
-    if payment_in.amount_paid>outstanding: raise HTTPException(status_code=409,detail='Payment exceeds the outstanding invoice amount')
-    pay=Payment(**payment_in.model_dump(),organization_id=organization_id);db.add(pay);new_paid=paid+payment_in.amount_paid;invoice.status='PAID' if new_paid==invoice.amount_due else 'PARTIALLY_PAID';db.commit();db.refresh(pay);log_action(db,organization_id,user_id,'CREATE','PAYMENT',pay.id,new_values=str(payment_in.model_dump()));return pay
+    try:
+        invoice=db.query(Invoice).filter(Invoice.id==payment_in.invoice_id,Invoice.organization_id==organization_id).with_for_update().first()
+        if not invoice: raise HTTPException(status_code=400,detail='Invoice is not available in this organization')
+        if invoice.status.upper() in {'CANCELLED','PAID'}: raise HTTPException(status_code=409,detail='Payments cannot be recorded against a closed invoice')
+        paid=sum(row.amount_paid for row in db.query(Payment).filter(Payment.organization_id==organization_id,Payment.invoice_id==invoice.id).all());outstanding=invoice.amount_due-paid
+        if payment_in.amount_paid<=0: raise HTTPException(status_code=422,detail='Payment amount must be greater than zero')
+        if outstanding<=0: raise HTTPException(status_code=409,detail='Invoice has no outstanding balance')
+        if payment_in.amount_paid>outstanding: raise HTTPException(status_code=409,detail='Payment exceeds the outstanding invoice amount')
+        pay=Payment(**payment_in.model_dump(),organization_id=organization_id);db.add(pay);new_paid=paid+payment_in.amount_paid;invoice.status='PAID' if new_paid>=invoice.amount_due else 'PARTIALLY_PAID';db.flush();log_action(db,organization_id,user_id,'CREATE','PAYMENT',pay.id,new_values=str(payment_in.model_dump()));db.commit();db.refresh(pay);return pay
+    except HTTPException:
+        db.rollback();raise
+    except Exception:
+        db.rollback();raise
