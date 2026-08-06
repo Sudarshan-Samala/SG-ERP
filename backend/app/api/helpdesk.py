@@ -11,6 +11,7 @@ from app.schemas.helpdesk import Ticket,TicketCreate
 from app.models.base import User,Ticket as TicketModel
 from app.models.helpdesk_comment import TicketComment
 from app.models.workflow_extensions import HelpdeskAssignment
+from app.services.audit.audit_service import log_action
 router=APIRouter()
 class CommentCreate(BaseModel):content:str=Field(min_length=2,max_length=2000)
 class AssignmentUpdate(BaseModel):assignee_id:UUID|None=None;sla_due_at:datetime|None=None
@@ -23,6 +24,9 @@ def read_tickets(db:Session=Depends(get_db),current_user:User=Depends(require_pe
 def ticket_summary(db:Session=Depends(get_db),current_user:User=Depends(require_permission('helpdesk.read'))):
  tickets=get_tickets(db,current_user.organization_id,None if _can_manage(current_user) else current_user.id);ids=[t.id for t in tickets];now=datetime.utcnow();assignments=db.query(HelpdeskAssignment).filter(HelpdeskAssignment.organization_id==current_user.organization_id,HelpdeskAssignment.ticket_id.in_(ids)).all() if ids else []
  return {'total':len(tickets),'open':sum(t.status=='OPEN' for t in tickets),'in_progress':sum(t.status=='IN_PROGRESS' for t in tickets),'resolved':sum(t.status=='RESOLVED' for t in tickets),'closed':sum(t.status=='CLOSED' for t in tickets),'high_priority':sum(t.priority=='HIGH' and t.status!='CLOSED' for t in tickets),'unassigned':sum(a.assignee_id is None for a in assignments)+max(0,len(tickets)-len(assignments)),'sla_overdue':sum(a.sla_due_at is not None and a.sla_due_at<now and next((t.status for t in tickets if t.id==a.ticket_id),'CLOSED') not in {'RESOLVED','CLOSED'} for a in assignments)}
+@router.get('/assignees')
+def assignees(db:Session=Depends(get_db),current_user:User=Depends(require_permission('helpdesk.manage'))):
+ rows=db.query(User).filter(User.organization_id==current_user.organization_id,User.is_active.is_(True)).order_by(User.full_name).all();return [{'id':u.id,'name':u.full_name,'email':u.email} for u in rows]
 @router.post('/',response_model=Ticket)
 def create_ticket_endpoint(ticket_in:TicketCreate,db:Session=Depends(get_db),current_user:User=Depends(require_permission('helpdesk.ticket.create'))):return create_ticket(db,ticket_in,current_user.organization_id,current_user.id)
 @router.get('/{ticket_id}/assignment')
@@ -31,12 +35,19 @@ def read_assignment(ticket_id:UUID,db:Session=Depends(get_db),current_user:User=
  a=db.query(HelpdeskAssignment).filter(HelpdeskAssignment.organization_id==current_user.organization_id,HelpdeskAssignment.ticket_id==ticket_id).first();return {'assignee_id':a.assignee_id if a else None,'sla_due_at':a.sla_due_at if a else None}
 @router.put('/{ticket_id}/assignment')
 def update_assignment(ticket_id:UUID,payload:AssignmentUpdate,db:Session=Depends(get_db),current_user:User=Depends(require_permission('helpdesk.manage'))):
- ticket=db.query(TicketModel).filter(TicketModel.id==ticket_id,TicketModel.organization_id==current_user.organization_id).first()
- if not ticket:raise HTTPException(status_code=404,detail='Ticket not found')
- if payload.assignee_id and not db.query(User).filter(User.id==payload.assignee_id,User.organization_id==current_user.organization_id,User.is_active.is_(True)).first():raise HTTPException(status_code=400,detail='Assignee must be an active user in this organization')
- a=db.query(HelpdeskAssignment).filter(HelpdeskAssignment.organization_id==current_user.organization_id,HelpdeskAssignment.ticket_id==ticket_id).with_for_update().first()
- if not a:a=HelpdeskAssignment(organization_id=current_user.organization_id,ticket_id=ticket_id,updated_by=current_user.id);db.add(a)
- a.assignee_id=payload.assignee_id;a.sla_due_at=payload.sla_due_at;a.updated_by=current_user.id;db.commit();db.refresh(a);return {'assignee_id':a.assignee_id,'sla_due_at':a.sla_due_at}
+ try:
+  ticket=db.query(TicketModel).filter(TicketModel.id==ticket_id,TicketModel.organization_id==current_user.organization_id).with_for_update().first()
+  if not ticket:raise HTTPException(status_code=404,detail='Ticket not found')
+  if payload.assignee_id and not db.query(User).filter(User.id==payload.assignee_id,User.organization_id==current_user.organization_id,User.is_active.is_(True)).first():raise HTTPException(status_code=400,detail='Assignee must be an active user in this organization')
+  if payload.sla_due_at:
+   due=payload.sla_due_at if payload.sla_due_at.tzinfo else payload.sla_due_at.replace(tzinfo=timezone.utc)
+   if due<=datetime.now(timezone.utc):raise HTTPException(status_code=422,detail='SLA due time must be in the future')
+  a=db.query(HelpdeskAssignment).filter(HelpdeskAssignment.organization_id==current_user.organization_id,HelpdeskAssignment.ticket_id==ticket_id).with_for_update().first()
+  previous={'assignee_id':str(a.assignee_id) if a and a.assignee_id else None,'sla_due_at':a.sla_due_at.isoformat() if a and a.sla_due_at else None}
+  if not a:a=HelpdeskAssignment(organization_id=current_user.organization_id,ticket_id=ticket_id,updated_by=current_user.id);db.add(a)
+  a.assignee_id=payload.assignee_id;a.sla_due_at=payload.sla_due_at;a.updated_by=current_user.id;db.flush();log_action(db,current_user.organization_id,current_user.id,'UPDATE','HELPDESK_ASSIGNMENT',ticket_id,previous_values=str(previous),new_values=str({'assignee_id':str(payload.assignee_id) if payload.assignee_id else None,'sla_due_at':payload.sla_due_at.isoformat() if payload.sla_due_at else None}));db.commit();db.refresh(a);return {'assignee_id':a.assignee_id,'sla_due_at':a.sla_due_at}
+ except HTTPException:db.rollback();raise
+ except Exception:db.rollback();raise
 @router.get('/{ticket_id}/comments')
 def read_comments(ticket_id:UUID,db:Session=Depends(get_db),current_user:User=Depends(require_permission('helpdesk.read'))):
  if not _visible_ticket(db,ticket_id,current_user):raise HTTPException(status_code=404,detail='Ticket not found')
