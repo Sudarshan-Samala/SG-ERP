@@ -2,7 +2,7 @@ PERMISSIONS = {
     "rbac.manage": "Manage tenant roles and user role assignments", "users.manage": "Manage tenant users and branch assignments", "branches.read": "View organization branches", "branches.manage": "Create, update and remove organization branches",
     "students.read": "View student records", "students.create": "Create student records", "students.manage": "Update and remove student records",
     "admissions.read": "View admission enquiries", "admissions.manage": "Create and manage admission enquiries",
-    "attendance.read": "View student attendance", "attendance.mark": "Mark student attendance",
+    "attendance.read": "View student attendance", "attendance.mark": "Mark student attendance", "attendance.correction.request": "Request corrections to student attendance", "attendance.correction.approve": "Approve or reject student attendance corrections",
     "fees.read": "View fee types, structures, invoices and payments", "fees.manage": "Manage fee types and fee structures", "fees.invoice.create": "Create student fee invoices", "fees.payment.collect": "Record fee payments",
     "finance.read": "View chart of accounts and journal entries", "finance.manage": "Manage finance accounts and journal entries",
     "hr.employee.read": "View employees", "hr.employee.create": "Create employees", "hr.salary.read": "View salary structures", "hr.salary.manage": "Manage salary structures", "hr.payroll.read": "View payroll", "hr.payroll.create": "Create payroll records",
@@ -11,14 +11,15 @@ PERMISSIONS = {
     "transport.read": "View transport vehicles, routes and drivers", "transport.manage": "Manage transport vehicles, routes and drivers",
     "helpdesk.read": "View helpdesk tickets", "helpdesk.ticket.create": "Create helpdesk tickets", "helpdesk.manage": "Manage helpdesk ticket workflow",
     "communication.read": "View organization communications", "communication.create": "Create communication drafts", "communication.manage": "Manage communication delivery workflow",
+    "reports.read": "View operational reports",
 }
 
 ROLE_PERMISSION_SETS = {
     "ERP Admin": set(PERMISSIONS),
     "Admissions Officer": {"admissions.read", "admissions.manage", "students.read", "students.create"},
-    "Teacher": {"students.read", "attendance.read", "attendance.mark", "exam.read", "exam.result.read"},
-    "Student Records Manager": {"students.read", "students.create", "students.manage", "admissions.read"},
-    "Finance Manager": {"fees.read", "fees.manage", "fees.invoice.create", "fees.payment.collect", "finance.read", "finance.manage"},
+    "Teacher": {"students.read", "attendance.read", "attendance.mark", "attendance.correction.request", "exam.read", "exam.result.read"},
+    "Student Records Manager": {"students.read", "students.create", "students.manage", "admissions.read", "attendance.read", "attendance.correction.request", "attendance.correction.approve"},
+    "Finance Manager": {"fees.read", "fees.manage", "fees.invoice.create", "fees.payment.collect", "finance.read", "finance.manage", "reports.read"},
     "HR Manager": {"hr.employee.read", "hr.employee.create", "hr.salary.read", "hr.salary.manage", "hr.payroll.read", "hr.payroll.create"},
     "Exam Manager": {"exam.read", "exam.manage", "exam.schedule.manage", "exam.result.read", "exam.result.create"},
     "Asset Manager": {"inventory.read", "inventory.manage", "assets.read", "assets.manage"},
