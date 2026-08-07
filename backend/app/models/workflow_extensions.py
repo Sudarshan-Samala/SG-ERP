@@ -30,3 +30,17 @@ class InventoryReorderPolicy(Base):
     reorder_level=Column(Integer,nullable=False,default=5)
     updated_at=Column(DateTime,default=datetime.utcnow,onupdate=datetime.utcnow,nullable=False)
     __table_args__=(UniqueConstraint('organization_id','item_id',name='uq_inventory_reorder_org_item'),)
+
+class AttendanceCorrection(Base):
+    __tablename__='attendance_corrections'
+    id=Column(UUID(as_uuid=True),primary_key=True,default=uuid.uuid4)
+    organization_id=Column(UUID(as_uuid=True),ForeignKey('organizations.id'),nullable=False,index=True)
+    attendance_id=Column(UUID(as_uuid=True),ForeignKey('attendance.id',ondelete='CASCADE'),nullable=False,unique=True,index=True)
+    requested_status=Column(String,nullable=False)
+    reason=Column(String,nullable=False)
+    status=Column(String,nullable=False,default='PENDING',index=True)
+    requested_by=Column(UUID(as_uuid=True),ForeignKey('users.id'),nullable=False)
+    reviewed_by=Column(UUID(as_uuid=True),ForeignKey('users.id'),nullable=True)
+    reviewed_at=Column(DateTime,nullable=True)
+    created_at=Column(DateTime,default=datetime.utcnow,nullable=False)
+    updated_at=Column(DateTime,default=datetime.utcnow,onupdate=datetime.utcnow,nullable=False)
