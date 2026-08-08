@@ -45,6 +45,11 @@ def _period_query(db,org_id,month,year):
 @router.get('/payroll-summary')
 def payroll_summary(month:Optional[int]=None,year:Optional[int]=None,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('hr.payroll.read'))):
     q=_period_query(db,current_org.id,month,year);return {'month':month,'year':year,'payroll_count':q.count(),'total_net_salary':int(q.with_entities(func.coalesce(func.sum(PayrollModel.net_salary),0)).scalar() or 0),'employee_count':q.with_entities(PayrollModel.employee_id).distinct().count()}
+@router.get('/payroll-summary/by-department')
+def payroll_summary_by_department(month:Optional[int]=None,year:Optional[int]=None,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('hr.payroll.read'))):
+    q=_period_query(db,current_org.id,month,year).join(EmployeeModel,(EmployeeModel.id==PayrollModel.employee_id)&(EmployeeModel.organization_id==current_org.id))
+    rows=q.with_entities(EmployeeModel.department,func.count(PayrollModel.id),func.coalesce(func.sum(PayrollModel.net_salary),0)).group_by(EmployeeModel.department).order_by(EmployeeModel.department.asc()).all()
+    return [{'department':department or 'Unassigned','payroll_count':int(count),'total_net_salary':int(total or 0)} for department,count,total in rows]
 @router.get('/payroll-export.csv')
 def payroll_export(month:Optional[int]=None,year:Optional[int]=None,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),_:User=Depends(require_permission('hr.payroll.read'))):
     rows=_period_query(db,current_org.id,month,year).join(EmployeeModel,(EmployeeModel.id==PayrollModel.employee_id)&(EmployeeModel.organization_id==current_org.id)).with_entities(EmployeeModel.employee_id,EmployeeModel.department,EmployeeModel.designation,PayrollModel.month,PayrollModel.year,PayrollModel.net_salary).order_by(PayrollModel.year.desc(),PayrollModel.month.desc(),EmployeeModel.employee_id).all();out=io.StringIO();writer=csv.writer(out);writer.writerow(['employee_id','department','designation','month','year','net_salary']);writer.writerows(rows);return Response(content=out.getvalue(),media_type='text/csv',headers={'Content-Disposition':'attachment; filename="payroll.csv"'})
