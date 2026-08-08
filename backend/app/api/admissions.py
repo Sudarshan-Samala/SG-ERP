@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from typing import List, Literal
+from typing import List, Literal, Optional
 from app.core.database import get_db
 from app.api.deps import accessible_branch_ids, enforce_branch_access, get_current_organization, require_permission
 from app.services.admission_service import get_enquiries, create_enquiry, update_enquiry_status
@@ -20,8 +20,13 @@ class AdmissionConversion(BaseModel):
     gender: Literal['male','female','other']
 
 @router.get('/enquiries', response_model=List[AdmissionEnquiry])
-def read_enquiries(db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('admissions.read'))):
-    return get_enquiries(db,current_org.id,None if current_user.is_superuser else accessible_branch_ids(current_user))
+def read_enquiries(branch_id: Optional[UUID] = None, status_filter: Optional[str] = None, search: Optional[str] = None, skip: int = 0, limit: int = 100, db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('admissions.read'))):
+    if status_filter and status_filter.upper() not in {'ENQUIRY','APPLIED','SELECTED','ADMITTED','REJECTED','CLOSED'}:
+        raise HTTPException(status_code=422, detail='Invalid admission status filter')
+    allowed = None if current_user.is_superuser else accessible_branch_ids(current_user)
+    if branch_id:
+        enforce_branch_access(current_user, branch_id)
+    return get_enquiries(db,current_org.id,allowed,branch_id,status_filter,search,skip,limit)
 
 @router.post('/enquiries', response_model=AdmissionEnquiry)
 def create_enquiry_endpoint(enquiry_in:AdmissionEnquiryCreate,db:Session=Depends(get_db),current_org:Organization=Depends(get_current_organization),current_user:User=Depends(require_permission('admissions.manage'))):

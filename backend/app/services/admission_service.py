@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.base import AcademicYear, AdmissionEnquiry, Branch
@@ -17,13 +18,22 @@ ADMISSION_TRANSITIONS = {
 }
 
 
-def get_enquiries(db: Session, organization_id: UUID, branch_ids: set[UUID] | None = None):
+def get_enquiries(db: Session, organization_id: UUID, branch_ids: set[UUID] | None = None, branch_id: UUID | None = None, status_filter: str | None = None, search: str | None = None, skip: int = 0, limit: int = 100):
     query = db.query(AdmissionEnquiry).filter(AdmissionEnquiry.organization_id == organization_id)
     if branch_ids is not None:
         if not branch_ids:
             return []
         query = query.filter(AdmissionEnquiry.branch_id.in_(branch_ids))
-    return query.order_by(AdmissionEnquiry.created_at.desc()).all()
+    if branch_id:
+        if branch_ids is not None and branch_id not in branch_ids:
+            return []
+        query = query.filter(AdmissionEnquiry.branch_id == branch_id)
+    if status_filter:
+        query = query.filter(AdmissionEnquiry.status == status_filter.upper())
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.filter(or_(AdmissionEnquiry.student_name.ilike(term), AdmissionEnquiry.parent_name.ilike(term), AdmissionEnquiry.email.ilike(term), AdmissionEnquiry.phone.ilike(term), AdmissionEnquiry.lead_source.ilike(term)))
+    return query.order_by(AdmissionEnquiry.created_at.desc()).offset(max(skip, 0)).limit(min(max(limit, 1), 500)).all()
 
 
 def create_enquiry(db: Session, enquiry_in: AdmissionEnquiryCreate, organization_id: UUID, user_id: UUID):
