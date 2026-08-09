@@ -37,7 +37,8 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
       - name: Run backend tests
-        run: pytest -q backend/tests backend/app/tests
+        working-directory: backend
+        run: pytest -q tests app/tests
 
   frontend:
     runs-on: ubuntu-latest
