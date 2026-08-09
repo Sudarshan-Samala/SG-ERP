@@ -17,13 +17,16 @@ class TicketBase(BaseModel):
             raise ValueError("value must not be blank")
         return value
 
+
 class TicketCreate(TicketBase):
     pass
+
 
 class Ticket(TicketBase):
     id: UUID
     organization_id: UUID
-    user_id: UUID
+    requester_id: UUID | None
     status: Literal["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]
+
     class Config:
         from_attributes = True
