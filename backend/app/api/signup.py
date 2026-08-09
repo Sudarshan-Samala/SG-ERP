@@ -31,6 +31,7 @@ class SignupRequest(BaseModel):
 
 class SignupToken(Token):
     session_id: UUID
+    csrf_token: str
 
 
 def _strong(password: str) -> bool:
@@ -91,8 +92,9 @@ def signup(payload: SignupRequest, request: Request, response: Response, db: Ses
         raise HTTPException(status_code=409, detail="Account or organization already exists")
     issued = create_session(db, user_id=user.id, organization_id=user.organization_id)
     token = create_access_token(subject=user.id, organization_id=user.organization_id, session_id=issued.session.id)
+    csrf_token = generate_csrf_token()
     _set_refresh_cookie(response, issued.refresh_token)
-    set_csrf_cookie(response, generate_csrf_token())
+    set_csrf_cookie(response, csrf_token)
     record_auth_event(
         db,
         event_type="signup",
@@ -105,4 +107,4 @@ def signup(payload: SignupRequest, request: Request, response: Response, db: Ses
         ip_address=ip,
         user_agent=request.headers.get("user-agent"),
     )
-    return {"access_token": token, "session_id": issued.session.id, "token_type": "bearer"}
+    return {"access_token": token, "session_id": issued.session.id, "token_type": "bearer", "csrf_token": csrf_token}
