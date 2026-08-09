@@ -1,34 +1,30 @@
 from datetime import datetime
-import re
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.auth_session import AuthSession
-from app.models.base import Organization, Permission, Role, User
+from app.models.base import Organization, User
 from app.schemas.user import Token
-from app.services.auth import create_access_token, get_password_hash, verify_password
+from app.services.auth import create_access_token, hash_refresh_token, verify_password
 from app.services.auth_audit import record_auth_event
-from app.services.csrf import clear_csrf_cookie, generate_csrf_token, require_csrf, set_csrf_cookie
+from app.services.csrf import clear_csrf_cookie, require_csrf
 from app.services.rate_limit import SlidingWindowRateLimiter
 from app.services.session_service import (
     InvalidSession,
     RefreshReplayDetected,
-    create_session,
     list_active_sessions,
     revoke_all_sessions,
     revoke_session,
     rotate_refresh_token,
 )
-from app.services.user_service import get_user_by_email
+from app.services.csrf import generate_csrf_token, set_csrf_cookie
 
 
 router = APIRouter()
@@ -36,14 +32,9 @@ login_ip_limiter = SlidingWindowRateLimiter(settings.AUTH_LOGIN_RATE_LIMIT, sett
 login_account_limiter = SlidingWindowRateLimiter(settings.AUTH_LOGIN_RATE_LIMIT, settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
 refresh_ip_limiter = SlidingWindowRateLimiter(settings.AUTH_REFRESH_RATE_LIMIT, settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
 refresh_session_limiter = SlidingWindowRateLimiter(settings.AUTH_REFRESH_RATE_LIMIT, settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
-signup_limiter = SlidingWindowRateLimiter(settings.AUTH_SIGNUP_RATE_LIMIT, settings.AUTH_RATE_LIMIT_WINDOW_SECONDS)
 
 
 class SessionToken(Token):
-    session_id: UUID
-
-
-class RefreshRequest(BaseModel):
     session_id: UUID
 
 
@@ -54,24 +45,12 @@ class SessionView(BaseModel):
     expires_at: datetime
 
 
-class SignupRequest(BaseModel):
-    organization_name: str = Field(min_length=2, max_length=120)
-    full_name: str = Field(min_length=2, max_length=120)
-    email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
-
-
 def _client_metadata(request: Request):
     return (request.client.host if request.client else None, request.headers.get("user-agent"))
 
 
-def _rate_key(request: Request, prefix: str):
-    ip, _ = _client_metadata(request)
-    return f"{prefix}:{ip or 'unknown'}"
-
-
-def _login_account_key(email: str):
-    return f"login-account:{email.strip().lower()[:160]}"
+def _correlation_id(request: Request) -> str | None:
+    return getattr(request.state, "correlation_id", None)
 
 
 def _set_refresh_cookie(response: Response, token: str):
@@ -96,90 +75,13 @@ def _clear_refresh_cookie(response: Response):
     )
 
 
-def _password_is_strong(password: str):
-    return bool(
-        re.search(r"[a-z]", password)
-        and re.search(r"[A-Z]", password)
-        and re.search(r"\d", password)
-        and re.search(r"[^A-Za-z0-9]", password)
-    )
+def _rate_key(request: Request, prefix: str):
+    ip, _ = _client_metadata(request)
+    return f"{prefix}:{ip or 'unknown'}"
 
 
-def _correlation_id(request: Request) -> str | None:
-    return getattr(request.state, "correlation_id", None)
-
-
-@router.post("/signup", response_model=SessionToken, status_code=status.HTTP_201_CREATED)
-def signup(
-    payload: SignupRequest,
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-):
-    signup_limiter.check(_rate_key(request, "signup"))
-    ip, user_agent = _client_metadata(request)
-    email = str(payload.email).strip().lower()
-    organization_name = " ".join(payload.organization_name.split())
-    full_name = " ".join(payload.full_name.split())
-
-    if not _password_is_strong(payload.password):
-        raise HTTPException(
-            status_code=400,
-            detail="Password must include uppercase, lowercase, number and special character",
-        )
-    if get_user_by_email(db, email):
-        raise HTTPException(status_code=409, detail="An account with this email already exists")
-    if db.query(Organization).filter(func.lower(Organization.name) == organization_name.lower()).first():
-        raise HTTPException(status_code=409, detail="An organization with this name already exists")
-
-    try:
-        organization = Organization(name=organization_name, is_active=True)
-        db.add(organization)
-        db.flush()
-        role = Role(
-            name="Organization Administrator",
-            organization_id=organization.id,
-            permissions=db.query(Permission).all(),
-        )
-        db.add(role)
-        db.flush()
-        user = User(
-            email=email,
-            hashed_password=get_password_hash(payload.password),
-            full_name=full_name,
-            organization_id=organization.id,
-            is_active=True,
-            is_superuser=False,
-            roles=[role],
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Account or organization already exists")
-
-    issued = create_session(db, user_id=user.id, organization_id=user.organization_id)
-    token = create_access_token(
-        subject=user.id,
-        organization_id=user.organization_id,
-        session_id=issued.session.id,
-    )
-    _set_refresh_cookie(response, issued.refresh_token)
-    set_csrf_cookie(response, generate_csrf_token())
-    record_auth_event(
-        db,
-        event_type="signup",
-        outcome="success",
-        organization_id=user.organization_id,
-        user_id=user.id,
-        session_id=issued.session.id,
-        correlation_id=_correlation_id(request),
-        email=user.email,
-        ip_address=ip,
-        user_agent=user_agent,
-    )
-    return {"access_token": token, "session_id": issued.session.id, "token_type": "bearer"}
+def _login_account_key(email: str):
+    return f"login-account:{email.strip().lower()[:160]}"
 
 
 @router.post("/login", response_model=SessionToken)
@@ -193,7 +95,7 @@ def login(
     login_ip_limiter.check(_rate_key(request, "login-ip"))
     login_account_limiter.check(_login_account_key(email))
     ip, user_agent = _client_metadata(request)
-    user = get_user_by_email(db, email=email)
+    user = db.query(User).filter(User.email == email).first()
     generic_failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
 
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -222,8 +124,12 @@ def login(
         )
         raise generic_failure
 
-    issued = create_session(db, user_id=user.id, organization_id=user.organization_id)
-    token = create_access_token(
+    issued = __import__("app.services.session_service", fromlist=["create_session"]).create_session(
+        db,
+        user_id=user.id,
+        organization_id=user.organization_id,
+    )
+    access_token = create_access_token(
         subject=user.id,
         organization_id=user.organization_id,
         session_id=issued.session.id,
@@ -242,38 +148,39 @@ def login(
         ip_address=ip,
         user_agent=user_agent,
     )
-    return {"access_token": token, "session_id": issued.session.id, "token_type": "bearer"}
+    return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer"}
 
 
 @router.post("/refresh", response_model=SessionToken)
 def refresh(
-    request_body: RefreshRequest,
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
     refresh_token: str | None = Cookie(default=None, alias=settings.REFRESH_COOKIE_NAME),
 ):
     refresh_ip_limiter.check(_rate_key(request, "refresh-ip"))
-    refresh_session_limiter.check(f"refresh-session:{request_body.session_id}")
     require_csrf(request)
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
 
-    session_context = db.query(AuthSession).filter(AuthSession.id == request_body.session_id).first()
+    presented_hash = hash_refresh_token(refresh_token)
+    refresh_session_limiter.check(f"refresh-session:{presented_hash}")
+    token_context = (
+        db.query(AuthSession)
+        .join(User, User.id == AuthSession.user_id)
+        .filter(AuthSession.refresh_token_hash == presented_hash)
+        .first()
+    )
     try:
-        issued = rotate_refresh_token(
-            db,
-            session_id=request_body.session_id,
-            refresh_token=refresh_token,
-        )
+        issued = rotate_refresh_token(db, refresh_token=refresh_token)
     except RefreshReplayDetected:
         record_auth_event(
             db,
             event_type="refresh_replay",
             outcome="failure",
-            organization_id=session_context.organization_id if session_context else None,
-            user_id=session_context.user_id if session_context else None,
-            session_id=request_body.session_id,
+            organization_id=token_context.organization_id if token_context else None,
+            user_id=token_context.user_id if token_context else None,
+            session_id=token_context.id if token_context else None,
             correlation_id=_correlation_id(request),
         )
         _clear_refresh_cookie(response)
@@ -284,9 +191,9 @@ def refresh(
             db,
             event_type="refresh",
             outcome="failure",
-            organization_id=session_context.organization_id if session_context else None,
-            user_id=session_context.user_id if session_context else None,
-            session_id=request_body.session_id,
+            organization_id=token_context.organization_id if token_context else None,
+            user_id=token_context.user_id if token_context else None,
+            session_id=token_context.id if token_context else None,
             correlation_id=_correlation_id(request),
         )
         _clear_refresh_cookie(response)
@@ -325,12 +232,13 @@ def refresh(
         clear_csrf_cookie(response)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
 
-    token = create_access_token(
+    access_token = create_access_token(
         subject=user.id,
         organization_id=user.organization_id,
         session_id=issued.session.id,
     )
     _set_refresh_cookie(response, issued.refresh_token)
+    ip, user_agent = _client_metadata(request)
     record_auth_event(
         db,
         event_type="refresh",
@@ -340,10 +248,10 @@ def refresh(
         session_id=issued.session.id,
         correlation_id=_correlation_id(request),
         email=user.email,
-        ip_address=_client_metadata(request)[0],
-        user_agent=_client_metadata(request)[1],
+        ip_address=ip,
+        user_agent=user_agent,
     )
-    return {"access_token": token, "session_id": issued.session.id, "token_type": "bearer"}
+    return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer"}
 
 
 @router.get("/sessions", response_model=list[SessionView])
@@ -351,11 +259,7 @@ def sessions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return list_active_sessions(
-        db,
-        user_id=current_user.id,
-        organization_id=current_user.organization_id,
-    )
+    return list_active_sessions(db, user_id=current_user.id, organization_id=current_user.organization_id)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -374,6 +278,7 @@ def delete_session(
         reason="user_revoked",
     ):
         raise HTTPException(status_code=404, detail="Session not found")
+    ip, user_agent = _client_metadata(request)
     record_auth_event(
         db,
         event_type="session_revocation",
@@ -383,8 +288,8 @@ def delete_session(
         session_id=session_id,
         correlation_id=_correlation_id(request),
         email=current_user.email,
-        ip_address=_client_metadata(request)[0],
-        user_agent=_client_metadata(request)[1],
+        ip_address=ip,
+        user_agent=user_agent,
     )
 
 
@@ -405,6 +310,7 @@ def logout(
             organization_id=current_user.organization_id,
             reason="logout",
         )
+        ip, user_agent = _client_metadata(request)
         record_auth_event(
             db,
             event_type="logout",
@@ -414,8 +320,8 @@ def logout(
             session_id=session_id,
             correlation_id=_correlation_id(request),
             email=current_user.email,
-            ip_address=_client_metadata(request)[0],
-            user_agent=_client_metadata(request)[1],
+            ip_address=ip,
+            user_agent=user_agent,
         )
     _clear_refresh_cookie(response)
     clear_csrf_cookie(response)
@@ -429,11 +335,8 @@ def logout_all(
     current_user: User = Depends(get_current_user),
 ):
     require_csrf(request)
-    count = revoke_all_sessions(
-        db,
-        user_id=current_user.id,
-        organization_id=current_user.organization_id,
-    )
+    revoke_all_sessions(db, user_id=current_user.id, organization_id=current_user.organization_id)
+    ip, user_agent = _client_metadata(request)
     record_auth_event(
         db,
         event_type="logout_all",
@@ -442,8 +345,8 @@ def logout_all(
         user_id=current_user.id,
         correlation_id=_correlation_id(request),
         email=current_user.email,
-        ip_address=_client_metadata(request)[0],
-        user_agent=_client_metadata(request)[1],
+        ip_address=ip,
+        user_agent=user_agent,
     )
     _clear_refresh_cookie(response)
     clear_csrf_cookie(response)
