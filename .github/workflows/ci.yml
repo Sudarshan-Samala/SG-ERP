@@ -37,8 +37,10 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
       - name: Run backend tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
         working-directory: backend
-        run: pytest -q tests app/tests
+        run: python -m pytest -q tests app/tests
 
   frontend:
     runs-on: ubuntu-latest
