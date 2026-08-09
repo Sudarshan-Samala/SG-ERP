@@ -16,6 +16,7 @@ class AuthSecurityEvent(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("auth_sessions.id", ondelete="SET NULL"), nullable=True)
     event_type = Column(String(64), nullable=False)
     outcome = Column(String(32), nullable=False)
+    correlation_id = Column(String(64), nullable=True)
     email_fingerprint = Column(String(64), nullable=True)
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(255), nullable=True)
@@ -25,4 +26,5 @@ class AuthSecurityEvent(Base):
         Index("ix_auth_security_events_org_created", "organization_id", "created_at"),
         Index("ix_auth_security_events_user_created", "user_id", "created_at"),
         Index("ix_auth_security_events_type_created", "event_type", "created_at"),
+        Index("ix_auth_security_events_correlation", "correlation_id"),
     )
