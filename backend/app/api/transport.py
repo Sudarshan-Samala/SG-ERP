@@ -12,7 +12,7 @@ router = APIRouter()
 @router.get("/summary")
 def transport_summary(db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("transport.read"))):
     vehicles=get_vehicles(db,current_org.id); routes=get_routes(db,current_org.id); drivers=get_drivers(db,current_org.id); assigned={r.vehicle_id for r in routes if r.vehicle_id}
-    return {"vehicles":len(vehicles),"routes":len(routes),"drivers":len(drivers),"assigned_vehicles":len(assigned),"available_vehicles":sum(v.id not in assigned for v in vehicles),"total_capacity":sum(v.capacity for v in vehicles)}
+    return {"vehicles":len(vehicles),"routes":len(routes),"drivers":len(drivers),"assigned_vehicles":len(assigned),"available_vehicles":sum(v.id not in assigned for v in vehicles),"unassigned_routes":sum(r.vehicle_id is None for r in routes),"total_capacity":sum(v.capacity for v in vehicles)}
 
 @router.get("/vehicles", response_model=List[Vehicle])
 def read_vehicles(db: Session = Depends(get_db), current_org: Organization = Depends(get_current_organization), _: User = Depends(require_permission("transport.read"))): return get_vehicles(db, current_org.id)
