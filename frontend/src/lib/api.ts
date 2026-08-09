@@ -1,5 +1,12 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    _skipAuthRefresh?: boolean;
+    _retry?: boolean;
+  }
+}
+
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1',
   headers: { 'Content-Type': 'application/json' },
@@ -30,7 +37,7 @@ function isStateChanging(method?: string) {
 async function refreshAccessToken() {
   if (!refreshPromise) {
     refreshPromise = api
-      .post('/auth/refresh', undefined, { _skipAuthRefresh: true } as InternalAxiosRequestConfig)
+      .post('/auth/refresh', undefined, { _skipAuthRefresh: true })
       .then((response) => {
         const token = response.data?.access_token;
         if (typeof token !== 'string') throw new Error('Refresh response did not contain an access token');
