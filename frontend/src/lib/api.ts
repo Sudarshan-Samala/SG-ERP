@@ -57,13 +57,19 @@ function isStateChanging(method?: string) {
   return Boolean(method && ['post', 'put', 'patch', 'delete'].includes(method.toLowerCase()));
 }
 
-async function refreshAccessToken() {
+export async function refreshAccessToken() {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       const csrf = await ensureCsrfToken();
       if (!csrf) return null;
       try {
-        const response = await api.post('/auth/refresh', undefined, { _skipAuthRefresh: true });
+        // Pass the CSRF header explicitly as well as through the interceptor.
+        // This avoids relying on Axios request-interceptor ordering for the
+        // cross-origin refresh request.
+        const response = await api.post('/auth/refresh', undefined, {
+          _skipAuthRefresh: true,
+          headers: { 'X-CSRF-Token': csrf },
+        });
         const token = response.data?.access_token;
         const nextCsrf = response.data?.csrf_token;
         if (typeof token !== 'string' || typeof nextCsrf !== 'string') throw new Error('Refresh response was incomplete');
