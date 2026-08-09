@@ -73,37 +73,40 @@ def list_active_sessions(db: Session, *, user_id, organization_id) -> list[AuthS
     )
 
 
-def rotate_refresh_token(db: Session, *, session_id, refresh_token: str) -> IssuedSession:
+def rotate_refresh_token(db: Session, *, refresh_token: str) -> IssuedSession:
     try:
-        session = (
-            db.query(AuthSession)
-            .filter(AuthSession.id == session_id)
-            .with_for_update()
-            .one_or_none()
-        )
         now = datetime.utcnow()
-        if session is None or session.revoked_at is not None or session.expires_at <= now:
-            raise InvalidSession("Session is invalid")
-
         presented_hash = hash_refresh_token(refresh_token)
         token_record = (
             db.query(AuthRefreshToken)
+            .filter(AuthRefreshToken.token_hash == presented_hash)
+            .with_for_update()
+            .one_or_none()
+        )
+        if token_record is None:
+            raise InvalidSession("Session is invalid")
+
+        session = (
+            db.query(AuthSession)
             .filter(
-                AuthRefreshToken.session_id == session.id,
-                AuthRefreshToken.token_family_id == session.token_family_id,
-                AuthRefreshToken.token_hash == presented_hash,
+                AuthSession.id == token_record.session_id,
+                AuthSession.token_family_id == token_record.token_family_id,
             )
             .with_for_update()
             .one_or_none()
         )
-
-        if token_record is None or token_record.revoked_at is not None or token_record.expires_at <= now:
+        if session is None or session.revoked_at is not None or session.expires_at <= now:
+            raise InvalidSession("Session is invalid")
+        if token_record.revoked_at is not None or token_record.expires_at <= now:
             raise InvalidSession("Session is invalid")
 
         if token_record.consumed_at is not None:
             session.revoked_at = now
             session.revocation_reason = "refresh_replay"
-            token_record.revoked_at = now
+            db.query(AuthRefreshToken).filter(
+                AuthRefreshToken.session_id == session.id,
+                AuthRefreshToken.revoked_at.is_(None),
+            ).update({"revoked_at": now}, synchronize_session=False)
             db.commit()
             raise RefreshReplayDetected("Refresh credential replay detected")
 
@@ -150,12 +153,13 @@ def revoke_session(db: Session, *, session_id, user_id, organization_id, reason:
         if session is None:
             return False
         if session.revoked_at is None:
-            session.revoked_at = datetime.utcnow()
+            now = datetime.utcnow()
+            session.revoked_at = now
             session.revocation_reason = reason[:120]
             db.query(AuthRefreshToken).filter(
                 AuthRefreshToken.session_id == session.id,
                 AuthRefreshToken.revoked_at.is_(None),
-            ).update({"revoked_at": datetime.utcnow()}, synchronize_session=False)
+            ).update({"revoked_at": now}, synchronize_session=False)
             db.commit()
         return True
     except Exception:
