@@ -15,8 +15,9 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **Foundation** | | | |
 | Setup | 🟢 IMPLEMENTED | 🟡 IN PROGRESS | 58 | |
-| Authentication | 🟡 IN PROGRESS | 🟡 IN PROGRESS | 54 | |
-| RBAC System | 🟡 IN PROGRESS | 🟡 IN PROGRESS | 55 | |
+| **CORE-001.1 Tenant-Aware Authentication & Sessions** | 🟢 IMPLEMENTED | 🟢 IMPLEMENTED | PRD v2.6 §§4-10 | Refresh-token ledger, replay detection, session revocation, CSRF, explicit CORS, correlation IDs, in-memory access tokens; CI verification pending |
+| Authentication | 🟢 IMPLEMENTED | 🟢 IMPLEMENTED | 54 | CORE-001.1 baseline implemented; broader authorization remains CORE-001.2 |
+| RBAC System | 🟡 IN PROGRESS | 🟡 IN PROGRESS | 55 | Full policy engine remains CORE-001.2 |
 | **Organization Management** | | | |
 | Organization CRUD | 🟢 IMPLEMENTED | 🟡 IN PROGRESS | 40 | Needs full CRUD/Validation |
 | Branch CRUD | 🟢 IMPLEMENTED | 🟡 IN PROGRESS | 40 | Needs full CRUD/Validation |
@@ -43,4 +44,3 @@
 | School Events | 🟢 IMPLEMENTED | 🟡 IN PROGRESS | 30 | Needs full CRUD/Validation |
 | Circular & Acknowledgement | 🟢 IMPLEMENTED | 🟡 IN PROGRESS | 32 | Needs full CRUD/Validation |
 | Document Management | 🟢 IMPLEMENTED | 🟡 IN PROGRESS | 36 | Needs full CRUD/Validation |
-

@@ -11,3 +11,5 @@ argon2-cffi
 python-multipart
 python-dotenv
 email_validator
+pytest
+httpx
