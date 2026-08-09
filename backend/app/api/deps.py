@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.auth_session import AuthSession
 from app.models.base import Organization, User
 from app.services.auth import decode_access_token
+from app.services.authorization_policy import AuthorizationPolicy
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login")
@@ -81,16 +82,9 @@ def require_platform_admin(current_user: User = Depends(get_current_user)) -> Us
 
 
 def require_permission(permission_name: str):
+    """Default-deny permission dependency. Permission is evaluated from tenant-bound roles."""
     def dependency(current_user: User = Depends(get_current_user)) -> User:
-        permissions = {
-            permission.name
-            for role in current_user.roles
-            if role.organization_id in (None, current_user.organization_id)
-            for permission in role.permissions
-        }
-        if permission_name not in permissions:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permission")
-        return current_user
+        return AuthorizationPolicy.require(current_user, permission_name)
 
     return dependency
 
@@ -104,5 +98,4 @@ def accessible_branch_ids(current_user: User) -> set[UUID]:
 
 
 def enforce_branch_access(current_user: User, branch_id: UUID) -> None:
-    if branch_id not in accessible_branch_ids(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Branch access denied")
+    AuthorizationPolicy.require_branch(None, current_user, branch_id)
