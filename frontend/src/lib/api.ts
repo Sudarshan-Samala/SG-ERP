@@ -14,7 +14,9 @@ const api = axios.create({
 });
 
 let accessToken: string | null = null;
+let csrfToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
+let csrfPromise: Promise<string | null> | null = null;
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
@@ -24,10 +26,31 @@ export function clearAccessToken() {
   accessToken = null;
 }
 
-function csrfToken() {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(/(?:^|; )sg_csrf=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+export function setCsrfToken(token: string | null) {
+  csrfToken = token;
+}
+
+export function clearCsrfToken() {
+  csrfToken = null;
+}
+
+async function ensureCsrfToken() {
+  if (csrfToken) return csrfToken;
+  if (!csrfPromise) {
+    csrfPromise = api
+      .get('/auth/csrf', { _skipAuthRefresh: true })
+      .then((response) => {
+        const token = response.data?.csrf_token;
+        if (typeof token !== 'string') throw new Error('CSRF bootstrap response did not contain a token');
+        csrfToken = token;
+        return token;
+      })
+      .catch(() => null)
+      .finally(() => {
+        csrfPromise = null;
+      });
+  }
+  return csrfPromise;
 }
 
 function isStateChanging(method?: string) {
@@ -36,29 +59,32 @@ function isStateChanging(method?: string) {
 
 async function refreshAccessToken() {
   if (!refreshPromise) {
-    refreshPromise = api
-      .post('/auth/refresh', undefined, { _skipAuthRefresh: true })
-      .then((response) => {
+    refreshPromise = (async () => {
+      const csrf = await ensureCsrfToken();
+      if (!csrf) return null;
+      try {
+        const response = await api.post('/auth/refresh', undefined, { _skipAuthRefresh: true });
         const token = response.data?.access_token;
-        if (typeof token !== 'string') throw new Error('Refresh response did not contain an access token');
+        const nextCsrf = response.data?.csrf_token;
+        if (typeof token !== 'string' || typeof nextCsrf !== 'string') throw new Error('Refresh response was incomplete');
         accessToken = token;
+        csrfToken = nextCsrf;
         return token;
-      })
-      .catch(() => {
+      } catch {
         accessToken = null;
+        csrfToken = null;
         return null;
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
+      }
+    })().finally(() => {
+      refreshPromise = null;
+    });
   }
   return refreshPromise;
 }
 
 api.interceptors.request.use((config) => {
   if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
-  const csrf = csrfToken();
-  if (csrf && isStateChanging(config.method)) config.headers['X-CSRF-Token'] = csrf;
+  if (csrfToken && isStateChanging(config.method)) config.headers['X-CSRF-Token'] = csrfToken;
   return config;
 });
 
@@ -81,6 +107,7 @@ api.interceptors.response.use(
         return api(original);
       }
       clearAccessToken();
+      clearCsrfToken();
       if (window.location.pathname !== '/login') {
         window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
       }
