@@ -36,6 +36,7 @@ refresh_session_limiter = SlidingWindowRateLimiter(settings.AUTH_REFRESH_RATE_LI
 
 class SessionToken(Token):
     session_id: UUID
+    csrf_token: str
 
 
 class SessionView(BaseModel):
@@ -84,6 +85,14 @@ def _login_account_key(email: str):
     return f"login-account:{email.strip().lower()[:160]}"
 
 
+@router.get("/csrf")
+def csrf(response: Response):
+    """Bootstrap a CSRF token for browser clients hosted on a different origin."""
+    token = generate_csrf_token()
+    set_csrf_cookie(response, token)
+    return {"csrf_token": token}
+
+
 @router.post("/login", response_model=SessionToken)
 def login(
     request: Request,
@@ -108,10 +117,11 @@ def login(
 
     issued = create_session(db, user_id=user.id, organization_id=user.organization_id)
     access_token = create_access_token(subject=user.id, organization_id=user.organization_id, session_id=issued.session.id)
+    csrf_token = generate_csrf_token()
     _set_refresh_cookie(response, issued.refresh_token)
-    set_csrf_cookie(response, generate_csrf_token())
+    set_csrf_cookie(response, csrf_token)
     record_auth_event(db, event_type="login", outcome="success", organization_id=user.organization_id, user_id=user.id, session_id=issued.session.id, correlation_id=_correlation_id(request), email=user.email, ip_address=ip, user_agent=user_agent)
-    return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer"}
+    return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer", "csrf_token": csrf_token}
 
 
 @router.post("/refresh", response_model=SessionToken)
@@ -156,10 +166,12 @@ def refresh(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
 
     access_token = create_access_token(subject=user.id, organization_id=user.organization_id, session_id=issued.session.id)
+    csrf_token = generate_csrf_token()
     _set_refresh_cookie(response, issued.refresh_token)
+    set_csrf_cookie(response, csrf_token)
     ip, user_agent = _client_metadata(request)
     record_auth_event(db, event_type="refresh", outcome="success", organization_id=user.organization_id, user_id=user.id, session_id=issued.session.id, correlation_id=_correlation_id(request), email=user.email, ip_address=ip, user_agent=user_agent)
-    return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer"}
+    return {"access_token": access_token, "session_id": issued.session.id, "token_type": "bearer", "csrf_token": csrf_token}
 
 
 @router.get("/sessions", response_model=list[SessionView])
