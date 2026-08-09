@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -8,8 +10,8 @@ from app.core.config import settings
 from app.models.base import User, Organization
 from app.services.auth import get_password_hash
 
-# Override settings for tests
-settings.DATABASE_URL = "postgresql:///sg_erp_test"
+# Use the CI/test database supplied by the environment.
+settings.DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine = create_engine(settings.DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
