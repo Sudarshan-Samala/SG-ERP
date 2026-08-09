@@ -29,3 +29,12 @@ def test_login_fail():
     response = client.post("/api/v1/auth/login", data={"username": "test@example.com", "password": "wrongpassword"})
     assert response.status_code == 401
     assert response.json()["detail"] == "Incorrect email or password"
+
+
+def test_csrf_bootstrap():
+    response = client.get("/api/v1/auth/csrf")
+    assert response.status_code == 200
+    token = response.json()["csrf_token"]
+    assert isinstance(token, str)
+    assert len(token) >= 32
+    assert settings.CSRF_COOKIE_NAME in response.cookies
