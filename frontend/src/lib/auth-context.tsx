@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import api, { clearAccessToken, setAccessToken } from '@/lib/api';
+import api, { clearAccessToken, refreshAccessToken, setAccessToken } from '@/lib/api';
 
 export interface AuthBranch { id: string; name: string; code: string }
 export interface CurrentUser {
@@ -36,10 +36,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    // Login has no refresh session yet. Avoid an unnecessary refresh request
+    // and, more importantly, avoid an in-flight unauthenticated refresh racing
+    // with a successful login and clearing the newly issued access token.
+    if (typeof window !== 'undefined' && window.location.pathname === '/login') {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const tokenResponse = await api.post('/auth/refresh');
-      const token = tokenResponse.data?.access_token;
-      if (typeof token !== 'string') throw new Error('No access token');
+      const token = await refreshAccessToken();
+      if (!token) throw new Error('No refresh session');
       setAccessToken(token);
       const response = await api.get<CurrentUser>('/auth/me');
       setUser(response.data);
