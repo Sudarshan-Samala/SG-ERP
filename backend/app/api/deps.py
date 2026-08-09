@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, set_current_tenant
 from app.models.auth_session import AuthSession
 from app.models.base import Organization, User
 from app.services.auth import decode_access_token
@@ -66,6 +66,7 @@ def get_current_user(
     if user is None:
         raise credentials_exception
 
+    set_current_tenant(organization_uuid)
     request.state.session_id = session_uuid
     request.state.organization_id = organization_uuid
     return user
