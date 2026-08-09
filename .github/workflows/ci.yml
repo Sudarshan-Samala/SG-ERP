@@ -24,7 +24,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sg_erp_test
       SECRET_KEY: ci-only-secret-key-change-me
-      TRUSTED_ORIGINS: http://localhost:3000
+      TRUSTED_ORIGINS: '["http://localhost:3000"]'
       REFRESH_COOKIE_SECURE: "false"
     steps:
       - uses: actions/checkout@v4
